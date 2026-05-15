@@ -21,7 +21,7 @@ Postgres-backed queues are a well-trodden pattern, and there are good libraries 
 ## Install
 
 ```bash
-npm install fabrikk
+npm install @bitfootco/fabrikk
 ```
 
 Requires Node.js 18+ and Postgres 14+.
@@ -33,7 +33,7 @@ Requires Node.js 18+ and Postgres 14+.
 This is the entire bare API.
 
 ```ts
-import { Queue } from 'fabrikk'
+import { Queue } from '@bitfootco/fabrikk'
 
 // 1. Define your job types
 type Jobs = {

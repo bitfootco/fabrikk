@@ -16,4 +16,4 @@ Goal: implement the full public API defined in `README.md`, with every commit an
 - [ ] M10: Battery — rateLimit — `queue.setRateLimit(name, { max, window })`, cluster-wide enforcement via Postgres timestamptz window {depends: M4}
 - [ ] M11: Battery — fanout — `queue.fanout(source, [targets])`, atomic multi-enqueue on source job insert {depends: M4}
 - [ ] M12: Battery — dashboard — `queue.dashboardHandler()` Node.js handler, all REST endpoints, Express + Fastify compatible {depends: M4}
-- [ ] M13: Publish prep — `npm run build` green, `dist/` has `.js` + `.d.ts` pairs, `package.json` `main`/`exports`/`types`/`files` fields correct, `npm pack` produces a valid tarball {depends: M5, M6, M7, M8, M9, M10, M11, M12}
+- [ ] M13: Publish prep — `npm run build` green, `dist/` has `.js` + `.d.ts` pairs, `package.json` `name=@bitfootco/fabrikk`, `main`/`exports`/`types`/`files` fields correct, `npm pack` produces a valid tarball {depends: M5, M6, M7, M8, M9, M10, M11, M12}
