@@ -386,12 +386,13 @@ await queue.enqueue('send-email', { amountCents: 100 }); // TS error ✓
 
 ```ts
 const queue = new Queue<Jobs>({
-  // Required
-  connectionString: string, // Postgres connection string
+  // Connection — provide one of:
+  connectionString: string, // Postgres connection string (Fabrikk creates and owns the pool)
+  pool: Pool, // Existing pg.Pool (Fabrikk borrows it; stop() will not close it)
 
   // Optional
   schema: string, // Postgres schema, default: 'public'
-  poolSize: number, // PG connection pool size, default: 10
+  poolSize: number, // PG connection pool size — only used with connectionString, default: 10
   pollIntervalMs: number, // How often workers poll, default: 1000
   shutdown: {
     gracePeriodMs: number, // Grace period on stop(), default: 30000

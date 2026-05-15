@@ -12,16 +12,23 @@ interface IWorker {
 
 export class Queue<Jobs extends Record<string, unknown>> {
   private readonly pool: Pool;
+  private readonly ownPool: boolean;
   private readonly readyPromise: Promise<void>;
   private readonly abortController: AbortController;
   private readonly activeWorkers = new Set<IWorker>();
   private readonly pollIntervalMs: number;
 
   constructor(config: QueueConfig) {
-    this.pool = new Pool({
-      connectionString: config.connectionString,
-      max: config.poolSize ?? 10,
-    });
+    if ('pool' in config) {
+      this.pool = config.pool;
+      this.ownPool = false;
+    } else {
+      this.pool = new Pool({
+        connectionString: config.connectionString,
+        max: config.poolSize ?? 10,
+      });
+      this.ownPool = true;
+    }
     this.abortController = new AbortController();
     this.pollIntervalMs = config.pollIntervalMs ?? 1000;
     this.readyPromise = bootstrap(this.pool);
@@ -70,6 +77,6 @@ export class Queue<Jobs extends Record<string, unknown>> {
     const timeout = new Promise<void>((resolve) => setTimeout(resolve, gracePeriodMs));
     await Promise.race([allDone, timeout]);
 
-    await this.pool.end();
+    if (this.ownPool) await this.pool.end();
   }
 }

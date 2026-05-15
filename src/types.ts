@@ -29,11 +29,13 @@ export interface JobRow {
   failed_at: Date | null;
 }
 
-export interface QueueConfig {
-  connectionString: string;
-  poolSize?: number;
-  pollIntervalMs?: number;
-}
+import { Pool } from 'pg';
+
+type QueueConfigBase = { pollIntervalMs?: number };
+
+export type QueueConfig =
+  | (QueueConfigBase & { connectionString: string; poolSize?: number })
+  | (QueueConfigBase & { pool: Pool });
 
 export interface EnqueueOptions {
   maxAttempts?: number;
