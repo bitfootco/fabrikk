@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 
 import { Job, JobEntry, JobRow, RetriesConfig } from './types';
+import { HooksBus } from './batteries/hooks';
 import { buildClaimQuery, claimJob, completeJob, interruptibleSleep, rowToJob } from './worker';
 
 export class JobIterator<Payload> implements AsyncIterable<JobEntry<Payload>> {
@@ -13,6 +14,7 @@ export class JobIterator<Payload> implements AsyncIterable<JobEntry<Payload>> {
     private readonly pollIntervalMs: number,
     private readonly ready: Promise<void>,
     retriesConfig?: RetriesConfig,
+    private readonly hooks?: HooksBus,
   ) {
     this.claimQuery = buildClaimQuery(retriesConfig !== undefined);
   }

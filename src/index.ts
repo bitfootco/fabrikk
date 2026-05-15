@@ -1,4 +1,5 @@
 export { Queue } from './queue';
+export { HooksEmitter } from './batteries/hooks';
 
 export type {
   Job,
@@ -10,3 +11,5 @@ export type {
   RetriesConfig,
   RetriesJobOptions,
 } from './types';
+
+export type { HooksEventMap } from './batteries/hooks';
