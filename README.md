@@ -72,8 +72,8 @@ Prefer pull-based consumption? Every queue exposes an async iterator alongside `
 
 ```ts
 for await (const job of queue.jobs('send-email')) {
-  await sendEmail(job.payload)
-  await job.done()
+  await sendEmail(job.payload);
+  await job.done();
 }
 ```
 
@@ -92,7 +92,7 @@ const queue = new Queue<Jobs>({
     retries: {
       attempts: 3,
       backoff: 'exponential', // or 'linear' | 'fixed'
-      baseDelay: 1000,        // ms
+      baseDelay: 1000, // ms
     },
     dlq: true,
     cron: true,
@@ -101,10 +101,10 @@ const queue = new Queue<Jobs>({
     fanout: true,
     hooks: true,
     dashboard: {
-      path: '/queue',       // mounts REST API at this path on your existing server
+      path: '/queue', // mounts REST API at this path on your existing server
     },
   },
-})
+});
 ```
 
 Each battery is documented below. If it's not in your config, it doesn't exist — no schema additions, no overhead.
@@ -130,7 +130,7 @@ Override per job at enqueue time:
 ```ts
 await queue.enqueue('send-email', payload, {
   retries: { attempts: 10, backoff: 'linear' },
-})
+});
 ```
 
 Failed jobs that exhaust their retries are moved to the dead-letter queue if `dlq` is enabled, or discarded if not.
@@ -150,10 +150,10 @@ batteries: {
 Inspect and replay dead jobs:
 
 ```ts
-const dead = await queue.dlq.list('send-email')   // paginated
-await queue.dlq.replay(dead[0].id)                 // re-enqueues with fresh retry count
-await queue.dlq.discard(dead[0].id)                // permanent delete
-await queue.dlq.replayAll('send-email')            // bulk replay
+const dead = await queue.dlq.list('send-email'); // paginated
+await queue.dlq.replay(dead[0].id); // re-enqueues with fresh retry count
+await queue.dlq.discard(dead[0].id); // permanent delete
+await queue.dlq.replayAll('send-email'); // bulk replay
 ```
 
 Requires `retries` battery to be enabled.
@@ -173,11 +173,12 @@ batteries: {
 Register recurring jobs after queue creation:
 
 ```ts
-queue.cron('send-email', '0 9 * * 1-5', {   // 9am weekdays
+queue.cron('send-email', '0 9 * * 1-5', {
+  // 9am weekdays
   to: 'digest@example.com',
   subject: 'Daily digest',
   body: '...',
-})
+});
 ```
 
 Cron jobs are deduplicated across multiple workers using Postgres advisory locks — no double-firing in a scaled deployment.
@@ -197,8 +198,8 @@ batteries: {
 Set priority at enqueue time (higher number = higher priority, default 0):
 
 ```ts
-await queue.enqueue('send-email', payload, { priority: 10 })
-await queue.enqueue('send-email', payload, { priority: 1 })  // worked after
+await queue.enqueue('send-email', payload, { priority: 10 });
+await queue.enqueue('send-email', payload, { priority: 1 }); // worked after
 ```
 
 Workers are priority-aware automatically — no change to `.work()` or the iterator.
@@ -220,8 +221,8 @@ Set rate limits per queue:
 ```ts
 queue.setRateLimit('send-email', {
   max: 100,
-  window: '1m',   // '1s' | '1m' | '1h'
-})
+  window: '1m', // '1s' | '1m' | '1h'
+});
 ```
 
 Rate limits are enforced cluster-wide — safe across multiple worker processes.
@@ -241,13 +242,13 @@ batteries: {
 Define fanout rules:
 
 ```ts
-queue.fanout('user-signed-up', ['send-welcome-email', 'create-billing-account', 'notify-slack'])
+queue.fanout('user-signed-up', ['send-welcome-email', 'create-billing-account', 'notify-slack']);
 ```
 
 Then enqueue normally — Fabrikk fans it out for you:
 
 ```ts
-await queue.enqueue('user-signed-up', { userId: '123' })
+await queue.enqueue('user-signed-up', { userId: '123' });
 // → enqueues to send-welcome-email, create-billing-account, notify-slack
 ```
 
@@ -266,12 +267,12 @@ batteries: {
 Subscribe to events:
 
 ```ts
-queue.on('job:enqueued',   (event) => logger.info(event))
-queue.on('job:started',    (event) => metrics.increment('job.started'))
-queue.on('job:completed',  (event) => metrics.histogram('job.duration', event.durationMs))
-queue.on('job:failed',     (event) => logger.error(event))
-queue.on('job:retrying',   (event) => logger.warn(event))
-queue.on('job:dead',       (event) => alerts.notify(event))
+queue.on('job:enqueued', (event) => logger.info(event));
+queue.on('job:started', (event) => metrics.increment('job.started'));
+queue.on('job:completed', (event) => metrics.histogram('job.duration', event.durationMs));
+queue.on('job:failed', (event) => logger.error(event));
+queue.on('job:retrying', (event) => logger.warn(event));
+queue.on('job:dead', (event) => alerts.notify(event));
 ```
 
 All events are typed. `event.jobName` narrows the payload type in the handler.
@@ -294,23 +295,23 @@ Mount on Express, Fastify, or any Node.js HTTP server:
 
 ```ts
 // Express
-app.use('/queue', queue.dashboardHandler())
+app.use('/queue', queue.dashboardHandler());
 
 // Fastify
-fastify.all('/queue/*', queue.dashboardHandler())
+fastify.all('/queue/*', queue.dashboardHandler());
 ```
 
 #### Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/queue/jobs` | List jobs, filterable by queue / status / date |
-| `GET` | `/queue/jobs/:id` | Get a single job |
-| `POST` | `/queue/jobs/:id/replay` | Re-enqueue a dead job |
-| `DELETE` | `/queue/jobs/:id` | Discard a job |
-| `GET` | `/queue/queues` | List queues with stats (depth, throughput, error rate) |
-| `GET` | `/queue/cron` | List cron schedules and last-run times |
-| `GET` | `/queue/health` | Liveness check — returns 200 if queue is healthy |
+| Method   | Path                     | Description                                            |
+| -------- | ------------------------ | ------------------------------------------------------ |
+| `GET`    | `/queue/jobs`            | List jobs, filterable by queue / status / date         |
+| `GET`    | `/queue/jobs/:id`        | Get a single job                                       |
+| `POST`   | `/queue/jobs/:id/replay` | Re-enqueue a dead job                                  |
+| `DELETE` | `/queue/jobs/:id`        | Discard a job                                          |
+| `GET`    | `/queue/queues`          | List queues with stats (depth, throughput, error rate) |
+| `GET`    | `/queue/cron`            | List cron schedules and last-run times                 |
+| `GET`    | `/queue/health`          | Liveness check — returns 200 if queue is healthy       |
 
 All responses are JSON. Authentication is your responsibility — mount behind your existing auth middleware.
 
@@ -332,13 +333,13 @@ Every worker automatically receives an `AbortSignal`. When you call `queue.stop(
 const queue = new Queue<Jobs>({
   connectionString: process.env.DATABASE_URL,
   shutdown: {
-    gracePeriodMs: 30_000,  // default: 30s
+    gracePeriodMs: 30_000, // default: 30s
   },
-})
+});
 
 // Wire to your process signals
-process.on('SIGTERM', () => queue.stop())
-process.on('SIGINT',  () => queue.stop())
+process.on('SIGTERM', () => queue.stop());
+process.on('SIGINT', () => queue.stop());
 ```
 
 Inside your worker, respect the signal for long-running jobs:
@@ -346,11 +347,11 @@ Inside your worker, respect the signal for long-running jobs:
 ```ts
 queue.work('resize-image', async (job, signal) => {
   for (const chunk of chunks) {
-    if (signal.aborted) break
-    await processChunk(chunk)
+    if (signal.aborted) break;
+    await processChunk(chunk);
   }
-  await job.done()
-})
+  await job.done();
+});
 ```
 
 ---
@@ -361,22 +362,22 @@ Fabrikk is written in TypeScript and ships its own types. Define your job payloa
 
 ```ts
 type Jobs = {
-  'send-email': { to: string; subject: string }
-  'process-payment': { orderId: string; amountCents: number }
-}
+  'send-email': { to: string; subject: string };
+  'process-payment': { orderId: string; amountCents: number };
+};
 
-const queue = new Queue<Jobs>({ connectionString: '...' })
+const queue = new Queue<Jobs>({ connectionString: '...' });
 
 // ✅ Payload is { to: string; subject: string } — inferred, no casting
 queue.work('send-email', async (job) => {
-  job.payload.to       // string ✓
-  job.payload.subject  // string ✓
-  job.payload.orderId  // TS error — wrong job type ✓
-})
+  job.payload.to; // string ✓
+  job.payload.subject; // string ✓
+  job.payload.orderId; // TS error — wrong job type ✓
+});
 
 // ✅ Enqueue is type-checked too
-await queue.enqueue('send-email', { to: 'a@b.com', subject: 'Hi' })  // ✓
-await queue.enqueue('send-email', { amountCents: 100 })               // TS error ✓
+await queue.enqueue('send-email', { to: 'a@b.com', subject: 'Hi' }); // ✓
+await queue.enqueue('send-email', { amountCents: 100 }); // TS error ✓
 ```
 
 ---
@@ -386,22 +387,22 @@ await queue.enqueue('send-email', { amountCents: 100 })               // TS erro
 ```ts
 const queue = new Queue<Jobs>({
   // Required
-  connectionString: string,        // Postgres connection string
+  connectionString: string, // Postgres connection string
 
   // Optional
-  schema: string,                  // Postgres schema, default: 'public'
-  poolSize: number,                // PG connection pool size, default: 10
-  pollIntervalMs: number,          // How often workers poll, default: 1000
+  schema: string, // Postgres schema, default: 'public'
+  poolSize: number, // PG connection pool size, default: 10
+  pollIntervalMs: number, // How often workers poll, default: 1000
   shutdown: {
-    gracePeriodMs: number,         // Grace period on stop(), default: 30000
+    gracePeriodMs: number, // Grace period on stop(), default: 30000
   },
 
   // Batteries (all optional)
   batteries: {
     retries: {
-      attempts: number,            // Max attempts including first, default: 3
+      attempts: number, // Max attempts including first, default: 3
       backoff: 'exponential' | 'linear' | 'fixed',
-      baseDelay: number,           // ms, default: 1000
+      baseDelay: number, // ms, default: 1000
     },
     dlq: boolean,
     cron: boolean,
@@ -410,27 +411,27 @@ const queue = new Queue<Jobs>({
     fanout: boolean,
     hooks: boolean,
     dashboard: {
-      path: string,                // Mount path, default: '/queue'
+      path: string, // Mount path, default: '/queue'
     },
   },
-})
+});
 ```
 
 ---
 
 ## Comparison
 
-| | Fabrikk | pg-boss | BullMQ |
-|---|---|---|---|
-| Backend | Postgres | Postgres | Redis |
-| TypeScript | First-class, inferred | Partial | Good |
-| API surface | Minimal (opt-in) | Large | Large |
-| Schema management | Automatic | Automatic | N/A |
-| Dashboard | API endpoint (BYO UI) | None | Paid (BullBoard) |
-| Cron | Optional battery | Built-in | Built-in |
-| Rate limiting | Optional battery | None | Built-in |
-| Graceful shutdown | Built-in | Manual | Manual |
-| Zero-dep core | ✓ | ✗ | ✗ |
+|                   | Fabrikk               | pg-boss   | BullMQ           |
+| ----------------- | --------------------- | --------- | ---------------- |
+| Backend           | Postgres              | Postgres  | Redis            |
+| TypeScript        | First-class, inferred | Partial   | Good             |
+| API surface       | Minimal (opt-in)      | Large     | Large            |
+| Schema management | Automatic             | Automatic | N/A              |
+| Dashboard         | API endpoint (BYO UI) | None      | Paid (BullBoard) |
+| Cron              | Optional battery      | Built-in  | Built-in         |
+| Rate limiting     | Optional battery      | None      | Built-in         |
+| Graceful shutdown | Built-in              | Manual    | Manual           |
+| Zero-dep core     | ✓                     | ✗         | ✗                |
 
 ---
 

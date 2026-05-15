@@ -1,0 +1,48 @@
+{
+  "name": "@bitfootco/fabrikk",
+  "version": "0.1.0",
+  "description": "Postgres-native job queue for TypeScript. Bare by default. Powerful by choice.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint --no-error-on-unmatched-pattern src test",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.27.0",
+    "@types/node": "^18.19.0",
+    "@types/pg": "^8.11.0",
+    "eslint": "^9.27.0",
+    "husky": "^9.1.0",
+    "lint-staged": "^15.5.0",
+    "prettier": "^3.5.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.32.0",
+    "vitest": "^3.2.0"
+  },
+  "lint-staged": {
+    "*.{ts,js,mjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
+  }
+}
