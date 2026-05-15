@@ -7,6 +7,8 @@ export interface Job<Payload> {
   status: JobStatus;
   attempts: number;
   max_attempts: number;
+  backoff: string | null;
+  run_at: Date | null;
   error: string | null;
   created_at: Date;
   started_at: Date | null;
@@ -22,6 +24,8 @@ export interface JobRow {
   status: JobStatus;
   attempts: number;
   max_attempts: number;
+  backoff: string | null;
+  run_at: Date | null;
   error: string | null;
   created_at: Date;
   started_at: Date | null;
@@ -30,8 +34,15 @@ export interface JobRow {
 }
 
 import { Pool } from 'pg';
+import type { RetriesConfig, RetriesJobOptions } from './batteries/retries';
 
-type QueueConfigBase = { pollIntervalMs?: number };
+export type { RetriesConfig, RetriesJobOptions };
+
+interface BatteriesConfig {
+  retries?: RetriesConfig;
+}
+
+type QueueConfigBase = { pollIntervalMs?: number; batteries?: BatteriesConfig };
 
 export type QueueConfig =
   | (QueueConfigBase & { connectionString: string; poolSize?: number })
@@ -39,6 +50,7 @@ export type QueueConfig =
 
 export interface EnqueueOptions {
   maxAttempts?: number;
+  retries?: RetriesJobOptions;
 }
 
 export type WorkerHandler<Payload> = (job: Job<Payload>, signal: AbortSignal) => Promise<void>;

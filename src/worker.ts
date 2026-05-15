@@ -1,16 +1,22 @@
 import { Pool, PoolClient } from 'pg';
 
 import { Job, JobRow, WorkerHandler } from './types';
+import { RetriesConfig, computeDelay } from './batteries/retries';
 
-const CLAIM_QUERY = `
-  SELECT id, name, payload, status, attempts, max_attempts, error,
-         created_at, started_at, completed_at, failed_at
-  FROM fabrikk_jobs
-  WHERE name = $1 AND status = 'pending'
-  ORDER BY created_at ASC
-  LIMIT 1
-  FOR UPDATE SKIP LOCKED
-`;
+export function buildClaimQuery(hasRetries: boolean): string {
+  const extraCols = hasRetries ? ', backoff, run_at' : '';
+  const runAtClause = hasRetries ? '  AND run_at <= NOW()\n' : '';
+  return (
+    `  SELECT id, name, payload, status, attempts, max_attempts${extraCols}, error,\n` +
+    `         created_at, started_at, completed_at, failed_at\n` +
+    `  FROM fabrikk_jobs\n` +
+    `  WHERE name = $1 AND status = 'pending'\n` +
+    runAtClause +
+    `  ORDER BY created_at ASC\n` +
+    `  LIMIT 1\n` +
+    `  FOR UPDATE SKIP LOCKED\n`
+  );
+}
 
 export function rowToJob<Payload>(row: JobRow): Job<Payload> {
   return {
@@ -20,6 +26,8 @@ export function rowToJob<Payload>(row: JobRow): Job<Payload> {
     status: row.status,
     attempts: row.attempts,
     max_attempts: row.max_attempts,
+    backoff: row.backoff,
+    run_at: row.run_at,
     error: row.error,
     created_at: row.created_at,
     started_at: row.started_at,
@@ -50,9 +58,13 @@ export function interruptibleSleep(ms: number, signal: AbortSignal): Promise<voi
 // Claims the next pending job for `name` inside a transaction.
 // Returns null (and rolls back) if none available.
 // Caller is responsible for releasing the client after this returns.
-export async function claimJob(client: PoolClient, name: string): Promise<JobRow | null> {
+export async function claimJob(
+  client: PoolClient,
+  name: string,
+  claimQuery: string,
+): Promise<JobRow | null> {
   await client.query('BEGIN');
-  const result = await client.query<JobRow>(CLAIM_QUERY, [name]);
+  const result = await client.query<JobRow>(claimQuery, [name]);
   if (result.rows.length === 0) {
     await client.query('ROLLBACK');
     return null;
@@ -81,6 +93,33 @@ export async function failJob(pool: Pool, id: string, error: unknown): Promise<v
   );
 }
 
+export async function deadJob(pool: Pool, id: string, error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  await pool.query(
+    `UPDATE fabrikk_jobs SET status = 'dead', failed_at = NOW(), error = $2 WHERE id = $1`,
+    [id, message],
+  );
+}
+
+export async function retryJob(
+  pool: Pool,
+  id: string,
+  attempt: number,
+  globalConfig: RetriesConfig,
+  perJobBackoff?: string | null,
+): Promise<void> {
+  const effectiveConfig: RetriesConfig = perJobBackoff
+    ? { ...globalConfig, backoff: perJobBackoff as RetriesConfig['backoff'] }
+    : globalConfig;
+  const delayMs = computeDelay(attempt, effectiveConfig);
+  await pool.query(
+    `UPDATE fabrikk_jobs
+     SET status = 'pending', failed_at = NULL, run_at = NOW() + ($2 || ' milliseconds')::INTERVAL
+     WHERE id = $1`,
+    [id, delayMs],
+  );
+}
+
 // Minimal interface used by Queue to track workers without binding to the generic
 interface IWorker {
   wait(): Promise<void>;
@@ -88,6 +127,7 @@ interface IWorker {
 
 export class Worker<Payload> implements IWorker {
   private readonly donePromise: Promise<void>;
+  private readonly claimQuery: string;
 
   constructor(
     private readonly pool: Pool,
@@ -96,7 +136,9 @@ export class Worker<Payload> implements IWorker {
     private readonly signal: AbortSignal,
     private readonly pollIntervalMs: number,
     private readonly ready: Promise<void>,
+    private readonly retriesConfig?: RetriesConfig,
   ) {
+    this.claimQuery = buildClaimQuery(retriesConfig !== undefined);
     this.donePromise = this.run();
     // Swallow unhandled rejections — errors inside run() are surfaced via wait()
     this.donePromise.catch(() => undefined);
@@ -112,7 +154,7 @@ export class Worker<Payload> implements IWorker {
       const client = await this.pool.connect();
       let row: JobRow | null;
       try {
-        row = await claimJob(client, this.jobName);
+        row = await claimJob(client, this.jobName, this.claimQuery);
       } catch (err) {
         client.release(true);
         throw err;
@@ -129,7 +171,14 @@ export class Worker<Payload> implements IWorker {
         await this.handler(job, this.signal);
         await completeJob(this.pool, job.id);
       } catch (err) {
-        await failJob(this.pool, job.id, err);
+        // job.attempts is the pre-increment value; the current attempt number is attempts + 1
+        if (this.retriesConfig && job.attempts + 1 < job.max_attempts) {
+          await retryJob(this.pool, job.id, job.attempts + 1, this.retriesConfig, job.backoff);
+        } else if (this.retriesConfig) {
+          await deadJob(this.pool, job.id, err);
+        } else {
+          await failJob(this.pool, job.id, err);
+        }
       }
     }
   }

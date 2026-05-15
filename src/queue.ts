@@ -17,6 +17,7 @@ export class Queue<Jobs extends Record<string, unknown>> {
   private readonly abortController: AbortController;
   private readonly activeWorkers = new Set<IWorker>();
   private readonly pollIntervalMs: number;
+  private readonly batteries: QueueConfig['batteries'];
 
   constructor(config: QueueConfig) {
     if ('pool' in config) {
@@ -31,7 +32,8 @@ export class Queue<Jobs extends Record<string, unknown>> {
     }
     this.abortController = new AbortController();
     this.pollIntervalMs = config.pollIntervalMs ?? 1000;
-    this.readyPromise = bootstrap(this.pool);
+    this.batteries = config.batteries;
+    this.readyPromise = bootstrap(this.pool, config.batteries);
   }
 
   async enqueue<K extends keyof Jobs & string>(
@@ -40,11 +42,21 @@ export class Queue<Jobs extends Record<string, unknown>> {
     opts?: EnqueueOptions,
   ): Promise<void> {
     await this.readyPromise;
-    const maxAttempts = opts?.maxAttempts ?? 3;
-    await this.pool.query(
-      `INSERT INTO fabrikk_jobs (name, payload, max_attempts) VALUES ($1, $2, $3)`,
-      [name, JSON.stringify(payload), maxAttempts],
-    );
+    const retriesCfg = this.batteries?.retries;
+    const maxAttempts = opts?.retries?.attempts ?? opts?.maxAttempts ?? retriesCfg?.attempts ?? 3;
+
+    if (retriesCfg) {
+      const backoff = opts?.retries?.backoff ?? retriesCfg.backoff;
+      await this.pool.query(
+        `INSERT INTO fabrikk_jobs (name, payload, max_attempts, backoff) VALUES ($1, $2, $3, $4)`,
+        [name, JSON.stringify(payload), maxAttempts, backoff],
+      );
+    } else {
+      await this.pool.query(
+        `INSERT INTO fabrikk_jobs (name, payload, max_attempts) VALUES ($1, $2, $3)`,
+        [name, JSON.stringify(payload), maxAttempts],
+      );
+    }
   }
 
   work<K extends keyof Jobs & string>(name: K, handler: WorkerHandler<Jobs[K]>): void {
@@ -55,6 +67,7 @@ export class Queue<Jobs extends Record<string, unknown>> {
       this.abortController.signal,
       this.pollIntervalMs,
       this.readyPromise,
+      this.batteries?.retries,
     );
     this.activeWorkers.add(worker);
     worker.wait().finally(() => this.activeWorkers.delete(worker));
@@ -67,6 +80,7 @@ export class Queue<Jobs extends Record<string, unknown>> {
       this.abortController.signal,
       this.pollIntervalMs,
       this.readyPromise,
+      this.batteries?.retries,
     );
   }
 

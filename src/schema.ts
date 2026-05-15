@@ -1,4 +1,5 @@
 import { Pool, PoolClient } from 'pg';
+import type { RetriesConfig } from './batteries/retries';
 
 // Arbitrary stable bigint — uniquely identifies Fabrikk's schema bootstrap lock cluster-wide
 const FABRIKK_LOCK_KEY = 7482910423;
@@ -32,7 +33,7 @@ interface ColumnDef {
   ddl: string;
 }
 
-const EXPECTED_COLUMNS: ColumnDef[] = [
+const BASE_COLUMNS: ColumnDef[] = [
   { name: 'id', ddl: 'id UUID NOT NULL DEFAULT gen_random_uuid()' },
   { name: 'name', ddl: 'name TEXT NOT NULL' },
   { name: 'payload', ddl: "payload JSONB NOT NULL DEFAULT '{}'" },
@@ -46,7 +47,16 @@ const EXPECTED_COLUMNS: ColumnDef[] = [
   { name: 'failed_at', ddl: 'failed_at TIMESTAMPTZ' },
 ];
 
-export async function bootstrap(pool: Pool): Promise<void> {
+const RETRIES_COLUMNS: ColumnDef[] = [
+  { name: 'run_at', ddl: 'run_at TIMESTAMPTZ NOT NULL DEFAULT now()' },
+  { name: 'backoff', ddl: "backoff TEXT NOT NULL DEFAULT 'exponential'" },
+];
+
+interface BootstrapBatteries {
+  retries?: RetriesConfig;
+}
+
+export async function bootstrap(pool: Pool, batteries?: BootstrapBatteries): Promise<void> {
   const client = await pool.connect();
   try {
     const lockResult = await client.query<{ pg_try_advisory_lock: boolean }>(
@@ -62,7 +72,10 @@ export async function bootstrap(pool: Pool): Promise<void> {
     try {
       await client.query(CREATE_JOBS_TABLE);
       await client.query(CREATE_CLAIM_INDEX);
-      await selfHeal(client);
+      const expectedColumns = batteries?.retries
+        ? [...BASE_COLUMNS, ...RETRIES_COLUMNS]
+        : BASE_COLUMNS;
+      await selfHeal(client, expectedColumns);
     } finally {
       await client.query('SELECT pg_advisory_unlock($1)', [FABRIKK_LOCK_KEY]);
     }
@@ -71,7 +84,7 @@ export async function bootstrap(pool: Pool): Promise<void> {
   }
 }
 
-async function selfHeal(client: PoolClient): Promise<void> {
+async function selfHeal(client: PoolClient, expectedColumns: ColumnDef[]): Promise<void> {
   const existing = await client.query<{ column_name: string }>(
     `SELECT column_name
      FROM information_schema.columns
@@ -81,7 +94,7 @@ async function selfHeal(client: PoolClient): Promise<void> {
 
   const existingNames = new Set(existing.rows.map((r: { column_name: string }) => r.column_name));
 
-  for (const col of EXPECTED_COLUMNS) {
+  for (const col of expectedColumns) {
     if (!existingNames.has(col.name)) {
       await client.query(`ALTER TABLE fabrikk_jobs ADD COLUMN IF NOT EXISTS ${col.ddl}`);
     }
