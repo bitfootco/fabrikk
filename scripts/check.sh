@@ -11,6 +11,6 @@ echo "→ tsc..."
 npx tsc --noEmit
 
 echo "→ Vitest..."
-npx vitest run
+node --env-file=.env node_modules/.bin/vitest run
 
 echo "✓ All checks passed"

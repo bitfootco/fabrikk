@@ -17,8 +17,8 @@
     "build": "tsc",
     "lint": "eslint --no-error-on-unmatched-pattern src test",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "node --env-file=.env node_modules/.bin/vitest run",
+    "test:watch": "node --env-file=.env node_modules/.bin/vitest",
     "prepare": "husky"
   },
   "dependencies": {

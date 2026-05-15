@@ -7,7 +7,7 @@ Goal: implement the full public API defined in `README.md`, with every commit an
 - [x] M1: Project scaffolding and quality gates — `package.json`, `tsconfig.json`, `.env.example`, `eslint.config.js`, `prettier.config.js`, `vitest.config.ts`, `scripts/check.sh` (Prettier + ESLint + tsc + Vitest), Husky pre-commit (`lint-staged`) and pre-push (full `check.sh`) hooks
 - [x] M2: Schema bootstrap — `src/schema.ts` with `fabrikk_jobs` table, advisory-lock-guarded bootstrap, idempotent self-heal {depends: M1}
 - [x] M3: Core queue — `src/types.ts`, `src/queue.ts` (`enqueue`/`work`/`stop`), `src/worker.ts` (AbortSignal loop, `SELECT … FOR UPDATE SKIP LOCKED`), `src/iterator.ts` (async iterator), `src/index.ts` (public exports) {depends: M2}
-- [ ] M4: Core tests — `test/setup.ts`, `test/queue.test.ts`, `test/worker.test.ts` against real Postgres; enqueue, claim, complete, stop, and iterator all green {depends: M3}
+- [x] M4: Core tests — `test/setup.ts`, `test/queue.test.ts`, `test/worker.test.ts` against real Postgres; enqueue, claim, complete, stop, and iterator all green {depends: M3}
 - [ ] M5: Battery — retries — exponential/linear/fixed backoff with jitter, per-job override at enqueue time, zero footprint when absent {depends: M4}
 - [ ] M6: Battery — hooks — typed lifecycle events (`job:enqueued`, `job:started`, `job:completed`, `job:failed`, `job:retrying`, `job:dead`), `event.jobName` narrows payload type {depends: M4}
 - [ ] M7: Battery — dlq — `fabrikk_dlq` table, `queue.dlq.list/replay/discard/replayAll`, requires retries battery {depends: M5}
