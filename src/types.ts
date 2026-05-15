@@ -41,6 +41,7 @@ export type { RetriesConfig, RetriesJobOptions };
 interface BatteriesConfig {
   retries?: RetriesConfig;
   hooks?: boolean;
+  dlq?: boolean;
 }
 
 type QueueConfigBase = { pollIntervalMs?: number; batteries?: BatteriesConfig };

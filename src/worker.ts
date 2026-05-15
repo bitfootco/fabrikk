@@ -4,6 +4,8 @@ import { Job, JobRow, WorkerHandler } from './types';
 import { HooksBus } from './batteries/hooks';
 import { RetriesConfig, computeDelay } from './batteries/retries';
 
+export type DeadJobFn = (pool: Pool, id: string, error: unknown) => Promise<void>;
+
 export function buildClaimQuery(hasRetries: boolean): string {
   const extraCols = hasRetries ? ', backoff, run_at' : '';
   const runAtClause = hasRetries ? '  AND run_at <= NOW()\n' : '';
@@ -140,6 +142,7 @@ export class Worker<Payload> implements IWorker {
     private readonly ready: Promise<void>,
     private readonly retriesConfig?: RetriesConfig,
     private readonly hooks?: HooksBus,
+    private readonly deadJobFn?: DeadJobFn,
   ) {
     this.claimQuery = buildClaimQuery(retriesConfig !== undefined);
     this.donePromise = this.run();
@@ -147,7 +150,7 @@ export class Worker<Payload> implements IWorker {
   }
 
   wait(): Promise<void> {
-    return this.donePromise;
+    return this.donePromise.catch(() => undefined);
   }
 
   private async run(): Promise<void> {
@@ -202,7 +205,8 @@ export class Worker<Payload> implements IWorker {
             delayMs,
           });
         } else if (this.retriesConfig) {
-          await deadJob(this.pool, job.id, err);
+          const fn = this.deadJobFn ?? deadJob;
+          await fn(this.pool, job.id, err);
           this.hooks?.emit('job:dead', {
             ...startedPayload,
             error: errorMessage,

@@ -1,9 +1,11 @@
 import { Pool } from 'pg';
+import { setMaxListeners } from 'events';
 
 import { bootstrap } from './schema';
 import { JobEntry, QueueConfig, EnqueueOptions, WorkerHandler } from './types';
 import { HooksEmitter, HooksEventMap } from './batteries/hooks';
-import { Worker } from './worker';
+import { DlqApi, moveToDlq } from './batteries/dlq';
+import { Worker, DeadJobFn, deadJob } from './worker';
 import { JobIterator } from './iterator';
 
 // Queue tracks active workers via this minimal interface to avoid binding to the generic type
@@ -20,6 +22,7 @@ export class Queue<Jobs extends Record<string, unknown>> {
   private readonly pollIntervalMs: number;
   private readonly batteries: QueueConfig['batteries'];
   readonly hooks?: HooksEmitter<Jobs>;
+  readonly dlq?: DlqApi;
 
   constructor(config: QueueConfig) {
     if ('pool' in config) {
@@ -33,10 +36,14 @@ export class Queue<Jobs extends Record<string, unknown>> {
       this.ownPool = true;
     }
     this.abortController = new AbortController();
+    setMaxListeners(0, this.abortController.signal);
     this.pollIntervalMs = config.pollIntervalMs ?? 1000;
     this.batteries = config.batteries;
     if (config.batteries?.hooks) {
       this.hooks = new HooksEmitter<Jobs>();
+    }
+    if (config.batteries?.dlq) {
+      this.dlq = new DlqApi(this.pool);
     }
     this.readyPromise = bootstrap(this.pool, config.batteries);
   }
@@ -70,6 +77,11 @@ export class Queue<Jobs extends Record<string, unknown>> {
   }
 
   work<K extends keyof Jobs & string>(name: K, handler: WorkerHandler<Jobs[K]>): void {
+    const deadJobFn: DeadJobFn | undefined = this.batteries?.dlq
+      ? moveToDlq
+      : this.batteries?.retries
+        ? deadJob
+        : undefined;
     const worker = new Worker<Jobs[K]>(
       this.pool,
       name,
@@ -79,6 +91,7 @@ export class Queue<Jobs extends Record<string, unknown>> {
       this.readyPromise,
       this.batteries?.retries,
       this.hooks,
+      deadJobFn,
     );
     this.activeWorkers.add(worker);
     worker.wait().finally(() => this.activeWorkers.delete(worker));

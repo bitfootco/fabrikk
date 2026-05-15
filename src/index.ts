@@ -1,5 +1,6 @@
 export { Queue } from './queue';
 export { HooksEmitter } from './batteries/hooks';
+export { DlqApi } from './batteries/dlq';
 
 export type {
   Job,
@@ -13,3 +14,4 @@ export type {
 } from './types';
 
 export type { HooksEventMap } from './batteries/hooks';
+export type { DlqEntry } from './batteries/dlq';

@@ -52,8 +52,32 @@ const RETRIES_COLUMNS: ColumnDef[] = [
   { name: 'backoff', ddl: "backoff TEXT NOT NULL DEFAULT 'exponential'" },
 ];
 
+const CREATE_DLQ_TABLE = `
+  CREATE TABLE IF NOT EXISTS fabrikk_dlq (
+    id           UUID        PRIMARY KEY,
+    name         TEXT        NOT NULL,
+    payload      JSONB       NOT NULL DEFAULT '{}',
+    status       TEXT        NOT NULL DEFAULT 'dead',
+    attempts     INTEGER     NOT NULL DEFAULT 0,
+    max_attempts INTEGER     NOT NULL DEFAULT 3,
+    backoff      TEXT,
+    error        TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at   TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    failed_at    TIMESTAMPTZ,
+    dead_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  )
+`;
+
+const CREATE_DLQ_NAME_INDEX = `
+  CREATE INDEX IF NOT EXISTS fabrikk_dlq_name_idx
+    ON fabrikk_dlq (name)
+`;
+
 interface BootstrapBatteries {
   retries?: RetriesConfig;
+  dlq?: boolean;
 }
 
 export async function bootstrap(pool: Pool, batteries?: BootstrapBatteries): Promise<void> {
@@ -76,6 +100,11 @@ export async function bootstrap(pool: Pool, batteries?: BootstrapBatteries): Pro
         ? [...BASE_COLUMNS, ...RETRIES_COLUMNS]
         : BASE_COLUMNS;
       await selfHeal(client, expectedColumns);
+
+      if (batteries?.dlq) {
+        await client.query(CREATE_DLQ_TABLE);
+        await client.query(CREATE_DLQ_NAME_INDEX);
+      }
     } finally {
       await client.query('SELECT pg_advisory_unlock($1)', [FABRIKK_LOCK_KEY]);
     }
