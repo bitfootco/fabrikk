@@ -28,6 +28,12 @@ const CREATE_CLAIM_INDEX = `
     WHERE status = 'pending'
 `;
 
+const CREATE_PRIORITY_INDEX = `
+  CREATE INDEX IF NOT EXISTS fabrikk_jobs_priority_idx
+    ON fabrikk_jobs (status, priority DESC, created_at ASC)
+    WHERE status = 'pending'
+`;
+
 interface ColumnDef {
   name: string;
   ddl: string;
@@ -50,6 +56,10 @@ const BASE_COLUMNS: ColumnDef[] = [
 const RETRIES_COLUMNS: ColumnDef[] = [
   { name: 'run_at', ddl: 'run_at TIMESTAMPTZ NOT NULL DEFAULT now()' },
   { name: 'backoff', ddl: "backoff TEXT NOT NULL DEFAULT 'exponential'" },
+];
+
+const PRIORITY_COLUMNS: ColumnDef[] = [
+  { name: 'priority', ddl: 'priority INTEGER NOT NULL DEFAULT 0' },
 ];
 
 const CREATE_DLQ_TABLE = `
@@ -100,6 +110,7 @@ interface BootstrapBatteries {
   retries?: RetriesConfig;
   dlq?: boolean;
   cron?: boolean;
+  priority?: boolean;
 }
 
 export async function bootstrap(pool: Pool, batteries?: BootstrapBatteries): Promise<void> {
@@ -118,10 +129,16 @@ export async function bootstrap(pool: Pool, batteries?: BootstrapBatteries): Pro
     try {
       await client.query(CREATE_JOBS_TABLE);
       await client.query(CREATE_CLAIM_INDEX);
-      const expectedColumns = batteries?.retries
-        ? [...BASE_COLUMNS, ...RETRIES_COLUMNS]
-        : BASE_COLUMNS;
+      const expectedColumns = [
+        ...BASE_COLUMNS,
+        ...(batteries?.retries ? RETRIES_COLUMNS : []),
+        ...(batteries?.priority ? PRIORITY_COLUMNS : []),
+      ];
       await selfHeal(client, expectedColumns);
+
+      if (batteries?.priority) {
+        await client.query(CREATE_PRIORITY_INDEX);
+      }
 
       if (batteries?.dlq) {
         await client.query(CREATE_DLQ_TABLE);

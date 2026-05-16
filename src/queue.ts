@@ -65,13 +65,27 @@ export class Queue<Jobs extends Record<string, unknown>> {
     await this.readyPromise;
     const retriesCfg = this.batteries?.retries;
     const maxAttempts = opts?.retries?.attempts ?? opts?.maxAttempts ?? retriesCfg?.attempts ?? 3;
+    const priority = opts?.priority ?? 0;
 
     let jobId: string;
-    if (retriesCfg) {
+    if (retriesCfg && this.batteries?.priority) {
+      const backoff = opts?.retries?.backoff ?? retriesCfg.backoff;
+      const result = await this.pool.query<{ id: string }>(
+        `INSERT INTO fabrikk_jobs (name, payload, max_attempts, backoff, priority) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [name, JSON.stringify(payload), maxAttempts, backoff, priority],
+      );
+      jobId = result.rows[0].id;
+    } else if (retriesCfg) {
       const backoff = opts?.retries?.backoff ?? retriesCfg.backoff;
       const result = await this.pool.query<{ id: string }>(
         `INSERT INTO fabrikk_jobs (name, payload, max_attempts, backoff) VALUES ($1, $2, $3, $4) RETURNING id`,
         [name, JSON.stringify(payload), maxAttempts, backoff],
+      );
+      jobId = result.rows[0].id;
+    } else if (this.batteries?.priority) {
+      const result = await this.pool.query<{ id: string }>(
+        `INSERT INTO fabrikk_jobs (name, payload, max_attempts, priority) VALUES ($1, $2, $3, $4) RETURNING id`,
+        [name, JSON.stringify(payload), maxAttempts, priority],
       );
       jobId = result.rows[0].id;
     } else {
@@ -101,6 +115,7 @@ export class Queue<Jobs extends Record<string, unknown>> {
       this.batteries?.retries,
       this.hooks,
       deadJobFn,
+      this.batteries?.priority === true,
     );
     this.activeWorkers.add(worker);
     worker.wait().finally(() => this.activeWorkers.delete(worker));
@@ -115,6 +130,7 @@ export class Queue<Jobs extends Record<string, unknown>> {
       this.readyPromise,
       this.batteries?.retries,
       this.hooks,
+      this.batteries?.priority === true,
     );
   }
 

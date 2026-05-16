@@ -9,6 +9,7 @@ export interface Job<Payload> {
   max_attempts: number;
   backoff: string | null;
   run_at: Date | null;
+  priority: number;
   error: string | null;
   created_at: Date;
   started_at: Date | null;
@@ -26,6 +27,7 @@ export interface JobRow {
   max_attempts: number;
   backoff: string | null;
   run_at: Date | null;
+  priority: number;
   error: string | null;
   created_at: Date;
   started_at: Date | null;
@@ -43,6 +45,7 @@ interface BatteriesConfig {
   hooks?: boolean;
   dlq?: boolean;
   cron?: boolean;
+  priority?: boolean;
 }
 
 type QueueConfigBase = { pollIntervalMs?: number; batteries?: BatteriesConfig };
@@ -54,6 +57,7 @@ export type QueueConfig =
 export interface EnqueueOptions {
   maxAttempts?: number;
   retries?: RetriesJobOptions;
+  priority?: number;
 }
 
 export type WorkerHandler<Payload> = (job: Job<Payload>, signal: AbortSignal) => Promise<void>;

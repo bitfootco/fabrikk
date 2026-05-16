@@ -15,8 +15,9 @@ export class JobIterator<Payload> implements AsyncIterable<JobEntry<Payload>> {
     private readonly ready: Promise<void>,
     retriesConfig?: RetriesConfig,
     private readonly hooks?: HooksBus,
+    hasPriority: boolean = false,
   ) {
-    this.claimQuery = buildClaimQuery(retriesConfig !== undefined);
+    this.claimQuery = buildClaimQuery(retriesConfig !== undefined, hasPriority);
   }
 
   [Symbol.asyncIterator](): AsyncIterator<JobEntry<Payload>> {

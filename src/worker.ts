@@ -6,16 +6,19 @@ import { RetriesConfig, computeDelay } from './batteries/retries';
 
 export type DeadJobFn = (pool: Pool, id: string, error: unknown) => Promise<void>;
 
-export function buildClaimQuery(hasRetries: boolean): string {
-  const extraCols = hasRetries ? ', backoff, run_at' : '';
+export function buildClaimQuery(hasRetries: boolean, hasPriority: boolean): string {
+  const extraCols = (hasRetries ? ', backoff, run_at' : '') + (hasPriority ? ', priority' : '');
   const runAtClause = hasRetries ? '  AND run_at <= NOW()\n' : '';
+  const orderBy = hasPriority
+    ? '  ORDER BY priority DESC, created_at ASC\n'
+    : '  ORDER BY created_at ASC\n';
   return (
     `  SELECT id, name, payload, status, attempts, max_attempts${extraCols}, error,\n` +
     `         created_at, started_at, completed_at, failed_at\n` +
     `  FROM fabrikk_jobs\n` +
     `  WHERE name = $1 AND status = 'pending'\n` +
     runAtClause +
-    `  ORDER BY created_at ASC\n` +
+    orderBy +
     `  LIMIT 1\n` +
     `  FOR UPDATE SKIP LOCKED\n`
   );
@@ -31,6 +34,7 @@ export function rowToJob<Payload>(row: JobRow): Job<Payload> {
     max_attempts: row.max_attempts,
     backoff: row.backoff,
     run_at: row.run_at,
+    priority: row.priority ?? 0,
     error: row.error,
     created_at: row.created_at,
     started_at: row.started_at,
@@ -138,8 +142,9 @@ export class Worker<Payload> implements IWorker {
     private readonly retriesConfig?: RetriesConfig,
     private readonly hooks?: HooksBus,
     private readonly deadJobFn?: DeadJobFn,
+    private readonly hasPriority: boolean = false,
   ) {
-    this.claimQuery = buildClaimQuery(retriesConfig !== undefined);
+    this.claimQuery = buildClaimQuery(retriesConfig !== undefined, hasPriority);
     this.donePromise = this.run();
     this.donePromise.catch(() => undefined);
   }
