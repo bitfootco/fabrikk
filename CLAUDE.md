@@ -67,14 +67,14 @@ The `Queue<Jobs>` generic flows types from definition through to worker handlers
 
 ```ts
 type Jobs = {
-  'send-email': { to: string; subject: string }
-}
+  'send-email': { to: string; subject: string };
+};
 
-const queue = new Queue<Jobs>({ connectionString: '...' })
+const queue = new Queue<Jobs>({ connectionString: '...' });
 
 queue.work('send-email', async (job) => {
-  job.payload // { to: string; subject: string } — no casting
-})
+  job.payload; // { to: string; subject: string } — no casting
+});
 ```
 
 ### 2. Batteries must be zero-footprint when absent
@@ -140,6 +140,7 @@ bash scripts/check.sh  # full validation: Prettier + ESLint + tsc + Vitest (run 
 The `dist/` directory is what gets published. It must contain `.d.ts` files alongside `.js` — `declaration: true` in tsconfig.
 
 Husky guards are wired up automatically after `npm install`:
+
 - **pre-commit**: runs `lint-staged` (Prettier + ESLint on staged files only)
 - **pre-push**: runs the full `scripts/check.sh` suite
 
@@ -169,9 +170,9 @@ Husky guards are wired up automatically after `npm install`:
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|---|---|---|
-| `DATABASE_URL` | Yes | Postgres connection string |
+| Variable       | Required | Description                |
+| -------------- | -------- | -------------------------- |
+| `DATABASE_URL` | Yes      | Postgres connection string |
 
 ---
 

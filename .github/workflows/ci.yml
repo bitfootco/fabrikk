@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    name: Lint, typecheck & test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: fabrikk_test
+          POSTGRES_USER: fabrikk
+          POSTGRES_PASSWORD: fabrikk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fabrikk -d fabrikk_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://fabrikk:fabrikk@localhost:5432/fabrikk_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Prettier
+        run: npx prettier --check .
+
+      - name: ESLint
+        run: npx eslint --no-error-on-unmatched-pattern src test
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: node node_modules/.bin/vitest run
