@@ -1,5 +1,7 @@
 import { Pool } from 'pg';
 
+import { withTransaction } from '../db';
+
 export class FanoutRegistry {
   private readonly rules = new Map<string, string[]>();
 
@@ -28,9 +30,7 @@ export async function enqueueTargets(
   vals: unknown[],
 ): Promise<string[]> {
   const ids: string[] = [];
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  await withTransaction(pool, async (client) => {
     const colList = ['name', ...cols].join(', ');
     for (const target of targets) {
       const rowVals = [target, ...vals];
@@ -41,12 +41,6 @@ export async function enqueueTargets(
       );
       ids.push(result.rows[0].id);
     }
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
+  });
   return ids;
 }

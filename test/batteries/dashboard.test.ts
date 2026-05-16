@@ -253,23 +253,22 @@ describe('dashboard battery — queues endpoint', () => {
 
 describe('dashboard battery — cron endpoint', () => {
   let pool: Pool;
-  let server: http.Server;
+  let server: http.Server | undefined;
   let url: string;
-  let queue: Queue<TestJobs>;
+  let queue: Queue<TestJobs> | undefined;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     pool = makeTestPool();
+    server = undefined;
+    queue = undefined;
     await clearJobs(pool);
-  });
-
-  afterAll(async () => {
-    await closeServer(server);
-    await clearJobs(pool);
-    await pool.end();
   });
 
   afterEach(async () => {
-    await queue.stop();
+    await queue?.stop();
+    if (server) await closeServer(server);
+    await clearJobs(pool);
+    await pool.end();
   });
 
   it('GET /queue/cron returns empty array when cron battery is absent', async () => {
@@ -286,9 +285,6 @@ describe('dashboard battery — cron endpoint', () => {
   });
 
   it('GET /queue/cron returns schedules when cron battery is enabled', async () => {
-    // Close previous server first
-    if (server) await closeServer(server);
-
     queue = new Queue<TestJobs>({
       pool,
       pollIntervalMs: 20,

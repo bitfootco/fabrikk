@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Queue } from '../../src/index';
 import { clearJobs, getJobRows, makeTestPool } from '../setup';
@@ -68,16 +68,13 @@ describe('priority battery — ordering', () => {
       processed.push((job.payload as { to: string }).to);
     });
 
-    await new Promise<void>((resolve) => {
-      const check = setInterval(async () => {
+    await vi.waitFor(
+      async () => {
         const rows = await getJobRows(pool, 'send-email');
-        if (rows.every((r) => r.status === 'completed')) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 30);
-    });
-
+        expect(rows.every((r) => r.status === 'completed')).toBe(true);
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     expect(processed[0]).toBe('high@b.com');
@@ -102,16 +99,13 @@ describe('priority battery — ordering', () => {
       processed.push((job.payload as { to: string }).to);
     });
 
-    await new Promise<void>((resolve) => {
-      const check = setInterval(async () => {
+    await vi.waitFor(
+      async () => {
         const rows = await getJobRows(pool, 'send-email');
-        if (rows.every((r) => r.status === 'completed')) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 30);
-    });
-
+        expect(rows.every((r) => r.status === 'completed')).toBe(true);
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     expect(processed[0]).toBe('first@b.com');

@@ -89,15 +89,13 @@ describe('hooks battery — job lifecycle', () => {
     queue.work('send-email', async () => {});
     await queue.enqueue('send-email', { to: 'a@b.com' });
 
-    await new Promise<void>((resolve) => {
-      const check = setInterval(async () => {
+    await vi.waitFor(
+      async () => {
         const rows = await getJobRows(pool, 'send-email');
-        if (rows[0]?.status === 'completed') {
-          clearInterval(check);
-          resolve();
-        }
-      }, 30);
-    });
+        expect(rows[0]?.status).toBe('completed');
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     expect(started).toHaveBeenCalledTimes(1);
@@ -127,7 +125,13 @@ describe('hooks battery — job lifecycle', () => {
     });
     await queue.enqueue('send-email', { to: 'a@b.com' });
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await vi.waitFor(
+      async () => {
+        const rows = await getJobRows(pool, 'send-email');
+        expect(rows[0]?.status).toBe('failed');
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     expect(failed).toHaveBeenCalledTimes(1);
@@ -157,15 +161,13 @@ describe('hooks battery — job lifecycle', () => {
     });
     await queue.enqueue('send-email', { to: 'a@b.com' });
 
-    await new Promise<void>((resolve) => {
-      const check = setInterval(async () => {
+    await vi.waitFor(
+      async () => {
         const rows = await getJobRows(pool, 'send-email');
-        if (rows[0]?.status === 'completed') {
-          clearInterval(check);
-          resolve();
-        }
-      }, 30);
-    });
+        expect(rows[0]?.status).toBe('completed');
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     expect(retrying).toHaveBeenCalledTimes(2);
@@ -195,12 +197,53 @@ describe('hooks battery — job lifecycle', () => {
     });
     await queue.enqueue('send-email', { to: 'a@b.com' });
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await vi.waitFor(
+      async () => {
+        const rows = await getJobRows(pool, 'send-email');
+        expect(rows[0]?.status).toBe('dead');
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     expect(dead).toHaveBeenCalledTimes(1);
     const event = dead.mock.calls[0][0];
     expect(event.error).toBe('dead');
     expect(event.jobName).toBe('send-email');
+  });
+
+  it('does not crash the worker when a hook handler throws', async () => {
+    const queue = new Queue<TestJobs>({
+      pool,
+      pollIntervalMs: 20,
+      batteries: { hooks: true },
+    });
+
+    // This handler throws — the worker must still process both jobs
+    queue.on('job:completed', () => {
+      throw new Error('hook error');
+    });
+
+    let processed = 0;
+    queue.work('send-email', async () => {
+      processed++;
+    });
+
+    await queue.enqueue('send-email', { to: 'a@b.com' });
+    await queue.enqueue('send-email', { to: 'b@b.com' });
+
+    try {
+      await vi.waitFor(
+        async () => {
+          const rows = await getJobRows(pool, 'send-email');
+          expect(rows.filter((r) => r.status === 'completed')).toHaveLength(2);
+        },
+        { timeout: 5000, interval: 30 },
+      );
+    } finally {
+      await queue.stop();
+    }
+
+    expect(processed).toBe(2);
   });
 });

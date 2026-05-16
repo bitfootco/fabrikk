@@ -1,5 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 
+import { toErrorMessage } from './db';
 import { Job, JobRow, IWorker, WorkerHandler, WorkerContext } from './types';
 import { RetriesConfig, computeDelay } from './batteries/retries';
 import { moveToDlq } from './batteries/dlq';
@@ -109,18 +110,16 @@ export async function completeJob(pool: Pool, id: string): Promise<void> {
 }
 
 export async function failJob(pool: Pool, id: string, error: unknown): Promise<void> {
-  const message = error instanceof Error ? error.message : String(error);
   await pool.query(
     `UPDATE fabrikk_jobs SET status = 'failed', failed_at = NOW(), error = $2 WHERE id = $1`,
-    [id, message],
+    [id, toErrorMessage(error)],
   );
 }
 
 export async function deadJob(pool: Pool, id: string, error: unknown): Promise<void> {
-  const message = error instanceof Error ? error.message : String(error);
   await pool.query(
     `UPDATE fabrikk_jobs SET status = 'dead', failed_at = NOW(), error = $2 WHERE id = $1`,
-    [id, message],
+    [id, toErrorMessage(error)],
   );
 }
 
@@ -205,7 +204,7 @@ export class Worker<Payload> implements IWorker {
           durationMs: Date.now() - startMs,
         });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
+        const errorMessage = toErrorMessage(err);
         if (this.context.retries && job.attempts + 1 < job.max_attempts) {
           const delayMs = await retryJob(
             this.pool,

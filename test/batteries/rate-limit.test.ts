@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Queue } from '../../src/index';
 import { clearJobs, getJobRows, makeTestPool } from '../setup';
@@ -45,15 +45,13 @@ describe('rateLimit battery — basic enforcement', () => {
 
     queue.work('send-email', async () => {});
 
-    await new Promise<void>((resolve) => {
-      const check = setInterval(async () => {
+    await vi.waitFor(
+      async () => {
         const rows = await getJobRows(pool, 'send-email');
-        if (rows.every((r) => r.status === 'completed')) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 30);
-    });
+        expect(rows.every((r) => r.status === 'completed')).toBe(true);
+      },
+      { timeout: 5000, interval: 30 },
+    );
 
     await queue.stop();
     const rows = await getJobRows(pool, 'send-email');
@@ -111,15 +109,13 @@ describe('rateLimit battery — basic enforcement', () => {
       resizeProcessed.push(job.payload.imageId);
     });
 
-    await new Promise<void>((resolve) => {
-      const check = setInterval(async () => {
+    await vi.waitFor(
+      async () => {
         const rows = await getJobRows(pool, 'resize-image');
-        if (rows.every((r) => r.status === 'completed')) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 30);
-    });
+        expect(rows.every((r) => r.status === 'completed')).toBe(true);
+      },
+      { timeout: 5000, interval: 30 },
+    );
 
     await queue.stop();
 
@@ -145,15 +141,13 @@ describe('rateLimit battery — basic enforcement', () => {
     });
 
     // Wait for queue1 to complete the first job (so started_at is recorded in DB)
-    await new Promise<void>((resolve) => {
-      const check = setInterval(async () => {
+    await vi.waitFor(
+      async () => {
         const rows = await pool.query("SELECT * FROM fabrikk_jobs WHERE name = 'send-email'");
-        if (rows.rows.some((r: { status: string }) => r.status === 'completed')) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 30);
-    });
+        expect(rows.rows.some((r: { status: string }) => r.status === 'completed')).toBe(true);
+      },
+      { timeout: 5000, interval: 30 },
+    );
 
     await queue1.stop();
     expect(q1Processed).toBe(1);

@@ -34,7 +34,8 @@ export class JobIterator<Payload> implements AsyncIterable<JobEntry<Payload>> {
       const client = await this.pool.connect();
       let claimResult: ClaimResult;
       try {
-        claimResult = await claimJob(client, this.jobName, this.claimQuery);
+        const rateLimitConfig = this.context.rateLimits?.get(this.jobName);
+        claimResult = await claimJob(client, this.jobName, this.claimQuery, rateLimitConfig);
       } catch (err) {
         client.release(true);
         throw err;

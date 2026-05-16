@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 
+import { toErrorMessage } from '../db';
 import { interruptibleSleep } from '../worker';
 import { HooksBus } from './hooks';
 import { RetriesConfig } from './retries';
@@ -225,10 +226,7 @@ export class CronScheduler {
         } catch (err) {
           await client.query('ROLLBACK').catch(() => undefined);
           if (this.hooks) {
-            this.hooks.emit('cron:error', {
-              entryId: entry.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
+            this.hooks.emit('cron:error', { entryId: entry.id, error: toErrorMessage(err) });
           } else {
             console.error(`Failed to process cron schedule ${entry.id}:`, err);
           }

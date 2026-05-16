@@ -1,5 +1,7 @@
 import { Pool } from 'pg';
 
+import { toErrorMessage, withTransaction } from '../db';
+
 export interface DlqEntry {
   id: string;
   name: string;
@@ -17,18 +19,16 @@ export interface DlqEntry {
 }
 
 export async function moveToDlq(pool: Pool, id: string, error: unknown): Promise<void> {
-  const message = error instanceof Error ? error.message : String(error);
-  const client = await pool.connect();
-  let done = false;
-  try {
-    await client.query('BEGIN');
+  const message = toErrorMessage(error);
+  await withTransaction(pool, async (client) => {
     const result = await client.query<DlqEntry>(
       'SELECT * FROM fabrikk_jobs WHERE id = $1 FOR UPDATE',
       [id],
     );
     if (result.rows.length === 0) {
-      await client.query('ROLLBACK');
-      done = true;
+      // Job already gone — early return causes withTransaction to COMMIT an empty
+      // transaction, which is harmless. Any write added before this check must
+      // precede it or be moved outside the guard.
       return;
     }
     const job = result.rows[0];
@@ -50,16 +50,7 @@ export async function moveToDlq(pool: Pool, id: string, error: unknown): Promise
       ],
     );
     await client.query('DELETE FROM fabrikk_jobs WHERE id = $1', [id]);
-    await client.query('COMMIT');
-    done = true;
-  } catch (err) {
-    if (!done) {
-      await client.query('ROLLBACK').catch(() => undefined);
-    }
-    throw err;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export class DlqApi {
@@ -80,36 +71,22 @@ export class DlqApi {
   }
 
   async replay(id: string): Promise<void> {
-    const client = await this.pool.connect();
-    let done = false;
-    try {
-      await client.query('BEGIN');
+    await withTransaction(this.pool, async (client) => {
       const result = await client.query<DlqEntry>(
         'SELECT * FROM fabrikk_dlq WHERE id = $1 FOR UPDATE',
         [id],
       );
       if (result.rows.length === 0) {
-        await client.query('ROLLBACK');
-        done = true;
         throw new Error(`DLQ entry ${id} not found`);
       }
       const entry = result.rows[0];
       await client.query(
-        `INSERT INTO fabrikk_jobs (id, name, payload, status, attempts, max_attempts, error, created_at)
-         VALUES ($1, $2, $3, 'pending', 0, $4, NULL, $5)`,
-        [entry.id, entry.name, entry.payload, entry.max_attempts, entry.created_at],
+        `INSERT INTO fabrikk_jobs (id, name, payload, status, attempts, max_attempts, backoff, error, created_at)
+         VALUES ($1, $2, $3, 'pending', 0, $4, $5, NULL, $6)`,
+        [entry.id, entry.name, entry.payload, entry.max_attempts, entry.backoff, entry.created_at],
       );
       await client.query('DELETE FROM fabrikk_dlq WHERE id = $1', [entry.id]);
-      await client.query('COMMIT');
-      done = true;
-    } catch (err) {
-      if (!done) {
-        await client.query('ROLLBACK').catch(() => undefined);
-      }
-      throw err;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   async discard(id: string): Promise<void> {
@@ -119,7 +96,13 @@ export class DlqApi {
   async replayAll(name?: string): Promise<void> {
     const entries = name ? await this.list(name) : await this.list();
     for (const entry of entries) {
-      await this.replay(entry.id);
+      try {
+        await this.replay(entry.id);
+      } catch (err) {
+        // Entry was already replayed or discarded by another process — skip it
+        if (err instanceof Error && err.message === `DLQ entry ${entry.id} not found`) continue;
+        throw err;
+      }
     }
   }
 }

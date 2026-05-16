@@ -102,8 +102,7 @@ export class Queue<Jobs extends Record<string, unknown>> {
     opts?: EnqueueOptions,
   ): Promise<void> {
     await this.readyPromise;
-    const maxAttempts =
-      opts?.retries?.attempts ?? opts?.maxAttempts ?? this.enabled.retries?.attempts ?? 3;
+    const maxAttempts = opts?.retries?.attempts ?? this.enabled.retries?.attempts ?? 3;
 
     // Build cols/vals without 'name' so fanout can substitute per-target name
     const extraCols: string[] = ['payload', 'max_attempts'];

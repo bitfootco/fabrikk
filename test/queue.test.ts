@@ -44,11 +44,11 @@ describe('enqueue', () => {
     expect(row.created_at).toBeInstanceOf(Date);
   });
 
-  it('respects the maxAttempts option', async () => {
+  it('respects the per-job retries.attempts override', async () => {
     await queue.enqueue(
       'send-email',
       { to: 'bob@example.com', subject: 'Retry me' },
-      { maxAttempts: 7 },
+      { retries: { attempts: 7 } },
     );
 
     const rows = await getJobRows(pool, 'send-email');

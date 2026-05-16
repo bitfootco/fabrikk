@@ -63,7 +63,6 @@ export type QueueConfig =
   | (QueueConfigBase & { pool: Pool });
 
 export interface EnqueueOptions {
-  maxAttempts?: number;
   retries?: RetriesJobOptions;
   priority?: number;
 }

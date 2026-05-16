@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Queue } from '../../src/index';
 import { clearJobs, getJobRows, makeTestPool } from '../setup';
@@ -31,26 +31,37 @@ describe('zero footprint when retries battery is absent', () => {
 
     await queue.enqueue('send-email', { to: 'a@b.com' });
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await vi.waitFor(
+      async () => {
+        const rows = await getJobRows(pool, 'send-email');
+        expect(rows[0]?.status).toBe('failed');
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     const rows = await getJobRows(pool, 'send-email');
-    expect(rows[0].status).toBe('failed');
     expect(rows[0].error).toBe('boom');
     expect(rows[0].attempts).toBe(1);
   });
 
-  it('does not retry when battery is absent — max_attempts is ignored', async () => {
+  it('does not retry when battery is absent — per-job attempts option is ignored', async () => {
     const queue = new Queue<TestJobs>({ pool, pollIntervalMs: 20 });
 
     queue.work('send-email', async () => {
       throw new Error('boom');
     });
 
-    // maxAttempts: 5, but without retries battery it should fail immediately
-    await queue.enqueue('send-email', { to: 'a@b.com' }, { maxAttempts: 5 });
+    // attempts: 5 is stored on the row but the worker will not retry without the battery
+    await queue.enqueue('send-email', { to: 'a@b.com' }, { retries: { attempts: 5 } });
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await vi.waitFor(
+      async () => {
+        const rows = await getJobRows(pool, 'send-email');
+        expect(rows[0]?.status).toBe('failed');
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     const rows = await getJobRows(pool, 'send-email');
@@ -78,17 +89,13 @@ describe('retries battery — exponential backoff', () => {
 
     await queue.enqueue('send-email', { to: 'a@b.com' });
 
-    // Poll until the job completes
-    await new Promise<void>((resolve) => {
-      const check = setInterval(async () => {
+    await vi.waitFor(
+      async () => {
         const rows = await getJobRows(pool, 'send-email');
-        if (rows[0]?.status === 'completed') {
-          clearInterval(check);
-          resolve();
-        }
-      }, 30);
-    });
-
+        expect(rows[0]?.status).toBe('completed');
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     const rows = await getJobRows(pool, 'send-email');
@@ -111,8 +118,13 @@ describe('retries battery — exponential backoff', () => {
 
     await queue.enqueue('send-email', { to: 'a@b.com' });
 
-    // Wait for retries to exhaust
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await vi.waitFor(
+      async () => {
+        const rows = await getJobRows(pool, 'send-email');
+        expect(rows[0]?.status).toBe('dead');
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     const rows = await getJobRows(pool, 'send-email');
@@ -162,7 +174,13 @@ describe('retries battery — per-job override', () => {
     // Override: only 1 attempt
     await queue.enqueue('send-email', { to: 'a@b.com' }, { retries: { attempts: 1 } });
 
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await vi.waitFor(
+      async () => {
+        const rows = await getJobRows(pool, 'send-email');
+        expect(rows[0]?.status).toBe('dead');
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     const rows = await getJobRows(pool, 'send-email');
@@ -187,7 +205,13 @@ describe('retries battery — per-job override', () => {
     // Override backoff to linear
     await queue.enqueue('send-email', { to: 'a@b.com' }, { retries: { backoff: 'linear' } });
 
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await vi.waitFor(
+      async () => {
+        const rows = await getJobRows(pool, 'send-email');
+        expect(rows[0]?.status).toBe('dead');
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     const rows = await getJobRows(pool, 'send-email');
@@ -215,8 +239,14 @@ describe('retries battery — run_at delay respected', () => {
 
     await queue.enqueue('send-email', { to: 'a@b.com' });
 
-    // Wait enough for one attempt + scheduling, but not for the 5s delay
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Wait for one attempt + scheduling, but not for the 5s delay
+    await vi.waitFor(
+      async () => {
+        const rows = await getJobRows(pool, 'send-email');
+        expect(rows[0]?.attempts).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 5000, interval: 30 },
+    );
     await queue.stop();
 
     const rows = await getJobRows(pool, 'send-email');

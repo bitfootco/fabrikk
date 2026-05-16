@@ -17,6 +17,7 @@ export type HooksEventMap<Jobs extends Record<string, unknown>> = {
   'job:retrying': JobEvent<Jobs, { error: string; attempt: number; delayMs: number }>;
   'job:failed': JobEvent<Jobs, { error: string }>;
   'job:dead': JobEvent<Jobs, { error: string }>;
+  'cron:error': { entryId: string; error: string };
 };
 
 export class HooksEmitter<Jobs extends Record<string, unknown>> implements HooksBus {
@@ -33,7 +34,14 @@ export class HooksEmitter<Jobs extends Record<string, unknown>> implements Hooks
   }
 
   emit(event: string, payload: unknown): void {
-    this.handlers.get(event)?.forEach((h) => h(payload));
+    this.handlers.get(event)?.forEach((h) => {
+      try {
+        h(payload);
+      } catch (err) {
+        // Hook handler threw — log to stderr but do not propagate. Worker must not crash.
+        console.error(`[fabrikk] Hook handler for "${event}" threw:`, err);
+      }
+    });
   }
 
   get size(): number {
