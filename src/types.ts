@@ -37,6 +37,7 @@ export interface JobRow {
 
 import { Pool } from 'pg';
 import type { RetriesConfig, RetriesJobOptions } from './batteries/retries';
+import type { HooksBus } from './batteries/hooks';
 
 export type { RetriesConfig, RetriesJobOptions };
 
@@ -64,6 +65,13 @@ export type WorkerHandler<Payload> = (job: Job<Payload>, signal: AbortSignal) =>
 
 export interface IWorker {
   wait(): Promise<void>;
+}
+
+export interface WorkerContext {
+  retries?: RetriesConfig;
+  hooks?: HooksBus;
+  priority: boolean;
+  dlq: boolean;
 }
 
 export interface JobEntry<Payload> {

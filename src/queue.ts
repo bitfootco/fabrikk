@@ -2,11 +2,19 @@ import { Pool } from 'pg';
 import { setMaxListeners } from 'events';
 
 import { bootstrap } from './schema';
-import { JobEntry, QueueConfig, EnqueueOptions, WorkerHandler, IWorker } from './types';
+import {
+  JobEntry,
+  QueueConfig,
+  EnqueueOptions,
+  WorkerHandler,
+  IWorker,
+  WorkerContext,
+} from './types';
 import { HooksEmitter, HooksEventMap } from './batteries/hooks';
-import { DlqApi, moveToDlq } from './batteries/dlq';
+import { DlqApi } from './batteries/dlq';
 import { CronScheduler, scheduleCron } from './batteries/cron';
-import { Worker, DeadJobFn, deadJob } from './worker';
+import { Worker } from './worker';
+import { RetriesConfig } from './batteries/retries';
 import { JobIterator } from './iterator';
 
 export class Queue<Jobs extends Record<string, unknown>> {
@@ -16,7 +24,13 @@ export class Queue<Jobs extends Record<string, unknown>> {
   private readonly abortController: AbortController;
   private readonly activeWorkers = new Set<IWorker>();
   private readonly pollIntervalMs: number;
-  private readonly batteries: QueueConfig['batteries'];
+  private readonly enabled: {
+    retries: RetriesConfig | undefined;
+    priority: boolean;
+    dlq: boolean;
+    cron: boolean;
+    hooks: boolean;
+  };
   readonly hooks?: HooksEmitter<Jobs>;
   readonly dlq?: DlqApi;
 
@@ -34,22 +48,28 @@ export class Queue<Jobs extends Record<string, unknown>> {
     this.abortController = new AbortController();
     setMaxListeners(0, this.abortController.signal);
     this.pollIntervalMs = config.pollIntervalMs ?? 1000;
-    this.batteries = config.batteries;
-    if (config.batteries?.hooks) {
+    this.enabled = {
+      retries: config.batteries?.retries,
+      priority: config.batteries?.priority === true,
+      dlq: config.batteries?.dlq === true,
+      cron: config.batteries?.cron === true,
+      hooks: config.batteries?.hooks === true,
+    };
+    if (this.enabled.hooks) {
       this.hooks = new HooksEmitter<Jobs>();
     }
-    if (config.batteries?.dlq) {
+    if (this.enabled.dlq) {
       this.dlq = new DlqApi(this.pool);
     }
     this.readyPromise = bootstrap(this.pool, config.batteries);
 
-    if (config.batteries?.cron) {
+    if (this.enabled.cron) {
       const scheduler = new CronScheduler(
         this.pool,
         this.abortController.signal,
         this.pollIntervalMs,
         this.readyPromise,
-        config.batteries.retries,
+        this.enabled.retries,
         this.hooks,
       );
       this.activeWorkers.add(scheduler);
@@ -63,48 +83,38 @@ export class Queue<Jobs extends Record<string, unknown>> {
     opts?: EnqueueOptions,
   ): Promise<void> {
     await this.readyPromise;
-    const retriesCfg = this.batteries?.retries;
-    const maxAttempts = opts?.retries?.attempts ?? opts?.maxAttempts ?? retriesCfg?.attempts ?? 3;
-    const priority = opts?.priority ?? 0;
+    const maxAttempts =
+      opts?.retries?.attempts ?? opts?.maxAttempts ?? this.enabled.retries?.attempts ?? 3;
 
-    let jobId: string;
-    if (retriesCfg && this.batteries?.priority) {
-      const backoff = opts?.retries?.backoff ?? retriesCfg.backoff;
-      const result = await this.pool.query<{ id: string }>(
-        `INSERT INTO fabrikk_jobs (name, payload, max_attempts, backoff, priority) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [name, JSON.stringify(payload), maxAttempts, backoff, priority],
-      );
-      jobId = result.rows[0].id;
-    } else if (retriesCfg) {
-      const backoff = opts?.retries?.backoff ?? retriesCfg.backoff;
-      const result = await this.pool.query<{ id: string }>(
-        `INSERT INTO fabrikk_jobs (name, payload, max_attempts, backoff) VALUES ($1, $2, $3, $4) RETURNING id`,
-        [name, JSON.stringify(payload), maxAttempts, backoff],
-      );
-      jobId = result.rows[0].id;
-    } else if (this.batteries?.priority) {
-      const result = await this.pool.query<{ id: string }>(
-        `INSERT INTO fabrikk_jobs (name, payload, max_attempts, priority) VALUES ($1, $2, $3, $4) RETURNING id`,
-        [name, JSON.stringify(payload), maxAttempts, priority],
-      );
-      jobId = result.rows[0].id;
-    } else {
-      const result = await this.pool.query<{ id: string }>(
-        `INSERT INTO fabrikk_jobs (name, payload, max_attempts) VALUES ($1, $2, $3) RETURNING id`,
-        [name, JSON.stringify(payload), maxAttempts],
-      );
-      jobId = result.rows[0].id;
+    const cols = ['name', 'payload', 'max_attempts'];
+    const vals: unknown[] = [name, JSON.stringify(payload), maxAttempts];
+
+    if (this.enabled.retries) {
+      cols.push('backoff');
+      vals.push(opts?.retries?.backoff ?? this.enabled.retries.backoff);
     }
+    if (this.enabled.priority) {
+      cols.push('priority');
+      vals.push(opts?.priority ?? 0);
+    }
+
+    const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+    const { rows } = await this.pool.query<{ id: string }>(
+      `INSERT INTO fabrikk_jobs (${cols.join(', ')}) VALUES (${placeholders}) RETURNING id`,
+      vals,
+    );
+    const jobId = rows[0].id;
 
     this.hooks?.emit('job:enqueued', { jobName: name, jobId, payload });
   }
 
   work<K extends keyof Jobs & string>(name: K, handler: WorkerHandler<Jobs[K]>): void {
-    const deadJobFn: DeadJobFn | undefined = this.batteries?.dlq
-      ? moveToDlq
-      : this.batteries?.retries
-        ? deadJob
-        : undefined;
+    const context: WorkerContext = {
+      retries: this.enabled.retries,
+      hooks: this.hooks,
+      priority: this.enabled.priority,
+      dlq: this.enabled.dlq,
+    };
     const worker = new Worker<Jobs[K]>(
       this.pool,
       name,
@@ -112,25 +122,26 @@ export class Queue<Jobs extends Record<string, unknown>> {
       this.abortController.signal,
       this.pollIntervalMs,
       this.readyPromise,
-      this.batteries?.retries,
-      this.hooks,
-      deadJobFn,
-      this.batteries?.priority === true,
+      context,
     );
     this.activeWorkers.add(worker);
     worker.wait().finally(() => this.activeWorkers.delete(worker));
   }
 
   jobs<K extends keyof Jobs & string>(name: K): AsyncIterable<JobEntry<Jobs[K]>> {
+    const context: WorkerContext = {
+      retries: this.enabled.retries,
+      hooks: this.hooks,
+      priority: this.enabled.priority,
+      dlq: this.enabled.dlq,
+    };
     return new JobIterator<Jobs[K]>(
       this.pool,
       name,
       this.abortController.signal,
       this.pollIntervalMs,
       this.readyPromise,
-      this.batteries?.retries,
-      this.hooks,
-      this.batteries?.priority === true,
+      context,
     );
   }
 
@@ -148,7 +159,7 @@ export class Queue<Jobs extends Record<string, unknown>> {
     expression: string,
     payload: Jobs[K],
   ): Promise<void> {
-    if (!this.batteries?.cron) {
+    if (!this.enabled.cron) {
       throw new Error('Cron battery is not enabled. Add `cron: true` to queue config.');
     }
     await this.readyPromise;

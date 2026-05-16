@@ -1,10 +1,8 @@
 import { Pool, PoolClient } from 'pg';
 
-import { Job, JobRow, IWorker, WorkerHandler } from './types';
-import { HooksBus } from './batteries/hooks';
+import { Job, JobRow, IWorker, WorkerHandler, WorkerContext } from './types';
 import { RetriesConfig, computeDelay } from './batteries/retries';
-
-export type DeadJobFn = (pool: Pool, id: string, error: unknown) => Promise<void>;
+import { moveToDlq } from './batteries/dlq';
 
 export function buildClaimQuery(hasRetries: boolean, hasPriority: boolean): string {
   const extraCols = (hasRetries ? ', backoff, run_at' : '') + (hasPriority ? ', priority' : '');
@@ -139,12 +137,9 @@ export class Worker<Payload> implements IWorker {
     private readonly signal: AbortSignal,
     private readonly pollIntervalMs: number,
     private readonly ready: Promise<void>,
-    private readonly retriesConfig?: RetriesConfig,
-    private readonly hooks?: HooksBus,
-    private readonly deadJobFn?: DeadJobFn,
-    private readonly hasPriority: boolean = false,
+    private readonly context: WorkerContext,
   ) {
-    this.claimQuery = buildClaimQuery(retriesConfig !== undefined, hasPriority);
+    this.claimQuery = buildClaimQuery(context.retries !== undefined, context.priority);
     this.donePromise = this.run();
     this.donePromise.catch(() => undefined);
   }
@@ -178,42 +173,42 @@ export class Worker<Payload> implements IWorker {
         jobId: job.id,
         payload: job.payload,
       };
-      this.hooks?.emit('job:started', startedPayload);
+      this.context.hooks?.emit('job:started', startedPayload);
 
       const startMs = Date.now();
       try {
         await this.handler(job, this.signal);
         await completeJob(this.pool, job.id);
-        this.hooks?.emit('job:completed', {
+        this.context.hooks?.emit('job:completed', {
           ...startedPayload,
           durationMs: Date.now() - startMs,
         });
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        if (this.retriesConfig && job.attempts + 1 < job.max_attempts) {
+        if (this.context.retries && job.attempts + 1 < job.max_attempts) {
           const delayMs = await retryJob(
             this.pool,
             job.id,
             job.attempts + 1,
-            this.retriesConfig,
+            this.context.retries,
             job.backoff,
           );
-          this.hooks?.emit('job:retrying', {
+          this.context.hooks?.emit('job:retrying', {
             ...startedPayload,
             error: errorMessage,
             attempt: job.attempts + 1,
             delayMs,
           });
-        } else if (this.retriesConfig) {
-          const fn = this.deadJobFn ?? deadJob;
+        } else if (this.context.retries) {
+          const fn = this.context.dlq ? moveToDlq : deadJob;
           await fn(this.pool, job.id, err);
-          this.hooks?.emit('job:dead', {
+          this.context.hooks?.emit('job:dead', {
             ...startedPayload,
             error: errorMessage,
           });
         } else {
           await failJob(this.pool, job.id, err);
-          this.hooks?.emit('job:failed', {
+          this.context.hooks?.emit('job:failed', {
             ...startedPayload,
             error: errorMessage,
           });

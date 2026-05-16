@@ -1,7 +1,6 @@
 import { Pool } from 'pg';
 
-import { Job, JobEntry, JobRow, RetriesConfig } from './types';
-import { HooksBus } from './batteries/hooks';
+import { Job, JobEntry, JobRow, WorkerContext } from './types';
 import { buildClaimQuery, claimJob, completeJob, interruptibleSleep, rowToJob } from './worker';
 
 export class JobIterator<Payload> implements AsyncIterable<JobEntry<Payload>> {
@@ -13,11 +12,9 @@ export class JobIterator<Payload> implements AsyncIterable<JobEntry<Payload>> {
     private readonly signal: AbortSignal,
     private readonly pollIntervalMs: number,
     private readonly ready: Promise<void>,
-    retriesConfig?: RetriesConfig,
-    private readonly hooks?: HooksBus,
-    hasPriority: boolean = false,
+    private readonly context: WorkerContext,
   ) {
-    this.claimQuery = buildClaimQuery(retriesConfig !== undefined, hasPriority);
+    this.claimQuery = buildClaimQuery(context.retries !== undefined, context.priority);
   }
 
   [Symbol.asyncIterator](): AsyncIterator<JobEntry<Payload>> {
