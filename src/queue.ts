@@ -1,3 +1,4 @@
+import { IncomingMessage, ServerResponse } from 'http';
 import { Pool } from 'pg';
 import { setMaxListeners } from 'events';
 
@@ -15,6 +16,9 @@ import { DlqApi } from './batteries/dlq';
 import { CronScheduler, scheduleCron } from './batteries/cron';
 import { Worker } from './worker';
 import { RetriesConfig } from './batteries/retries';
+import { RateLimitConfig, RateLimitMap } from './batteries/rate-limit';
+import { FanoutRegistry, enqueueTargets } from './batteries/fanout';
+import { DashboardConfig, DashboardHandler } from './batteries/dashboard';
 import { JobIterator } from './iterator';
 
 export class Queue<Jobs extends Record<string, unknown>> {
@@ -30,7 +34,13 @@ export class Queue<Jobs extends Record<string, unknown>> {
     dlq: boolean;
     cron: boolean;
     hooks: boolean;
+    rateLimit: boolean;
+    fanout: boolean;
+    dashboard: DashboardConfig | undefined;
   };
+  private readonly rateLimits: RateLimitMap = new Map();
+  private readonly fanoutRegistry?: FanoutRegistry;
+  private readonly dashboardInstance?: DashboardHandler;
   readonly hooks?: HooksEmitter<Jobs>;
   readonly dlq?: DlqApi;
 
@@ -54,12 +64,21 @@ export class Queue<Jobs extends Record<string, unknown>> {
       dlq: config.batteries?.dlq === true,
       cron: config.batteries?.cron === true,
       hooks: config.batteries?.hooks === true,
+      rateLimit: config.batteries?.rateLimit === true,
+      fanout: config.batteries?.fanout === true,
+      dashboard: config.batteries?.dashboard,
     };
     if (this.enabled.hooks) {
       this.hooks = new HooksEmitter<Jobs>();
     }
     if (this.enabled.dlq) {
       this.dlq = new DlqApi(this.pool);
+    }
+    if (this.enabled.fanout) {
+      this.fanoutRegistry = new FanoutRegistry();
+    }
+    if (this.enabled.dashboard) {
+      this.dashboardInstance = new DashboardHandler(this.pool, this.enabled.dashboard);
     }
     this.readyPromise = bootstrap(this.pool, config.batteries);
 
@@ -86,18 +105,30 @@ export class Queue<Jobs extends Record<string, unknown>> {
     const maxAttempts =
       opts?.retries?.attempts ?? opts?.maxAttempts ?? this.enabled.retries?.attempts ?? 3;
 
-    const cols = ['name', 'payload', 'max_attempts'];
-    const vals: unknown[] = [name, JSON.stringify(payload), maxAttempts];
+    // Build cols/vals without 'name' so fanout can substitute per-target name
+    const extraCols: string[] = ['payload', 'max_attempts'];
+    const extraVals: unknown[] = [JSON.stringify(payload), maxAttempts];
 
     if (this.enabled.retries) {
-      cols.push('backoff');
-      vals.push(opts?.retries?.backoff ?? this.enabled.retries.backoff);
+      extraCols.push('backoff');
+      extraVals.push(opts?.retries?.backoff ?? this.enabled.retries.backoff);
     }
     if (this.enabled.priority) {
-      cols.push('priority');
-      vals.push(opts?.priority ?? 0);
+      extraCols.push('priority');
+      extraVals.push(opts?.priority ?? 0);
     }
 
+    const fanoutTargets = this.fanoutRegistry?.get(name);
+    if (fanoutTargets) {
+      const ids = await enqueueTargets(this.pool, fanoutTargets, extraCols, extraVals);
+      for (let i = 0; i < fanoutTargets.length; i++) {
+        this.hooks?.emit('job:enqueued', { jobName: fanoutTargets[i], jobId: ids[i], payload });
+      }
+      return;
+    }
+
+    const cols = ['name', ...extraCols];
+    const vals: unknown[] = [name, ...extraVals];
     const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
     const { rows } = await this.pool.query<{ id: string }>(
       `INSERT INTO fabrikk_jobs (${cols.join(', ')}) VALUES (${placeholders}) RETURNING id`,
@@ -108,12 +139,36 @@ export class Queue<Jobs extends Record<string, unknown>> {
     this.hooks?.emit('job:enqueued', { jobName: name, jobId, payload });
   }
 
+  setRateLimit<K extends keyof Jobs & string>(name: K, config: RateLimitConfig): void {
+    if (!this.enabled.rateLimit) {
+      throw new Error('RateLimit battery is not enabled. Add `rateLimit: true` to queue config.');
+    }
+    this.rateLimits.set(name, config);
+  }
+
+  fanout<K extends keyof Jobs & string>(source: K, targets: Array<keyof Jobs & string>): void {
+    if (!this.fanoutRegistry) {
+      throw new Error('Fanout battery is not enabled. Add `fanout: true` to queue config.');
+    }
+    this.fanoutRegistry.register(source, targets as string[]);
+  }
+
+  dashboardHandler(): (req: IncomingMessage, res: ServerResponse) => void {
+    if (!this.dashboardInstance) {
+      throw new Error(
+        'Dashboard battery is not enabled. Add `dashboard: { path }` to queue config.',
+      );
+    }
+    return this.dashboardInstance.handler();
+  }
+
   work<K extends keyof Jobs & string>(name: K, handler: WorkerHandler<Jobs[K]>): void {
     const context: WorkerContext = {
       retries: this.enabled.retries,
       hooks: this.hooks,
       priority: this.enabled.priority,
       dlq: this.enabled.dlq,
+      rateLimits: this.enabled.rateLimit ? this.rateLimits : undefined,
     };
     const worker = new Worker<Jobs[K]>(
       this.pool,
@@ -134,6 +189,7 @@ export class Queue<Jobs extends Record<string, unknown>> {
       hooks: this.hooks,
       priority: this.enabled.priority,
       dlq: this.enabled.dlq,
+      rateLimits: this.enabled.rateLimit ? this.rateLimits : undefined,
     };
     return new JobIterator<Jobs[K]>(
       this.pool,

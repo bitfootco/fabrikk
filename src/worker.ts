@@ -3,6 +3,7 @@ import { Pool, PoolClient } from 'pg';
 import { Job, JobRow, IWorker, WorkerHandler, WorkerContext } from './types';
 import { RetriesConfig, computeDelay } from './batteries/retries';
 import { moveToDlq } from './batteries/dlq';
+import { RateLimitConfig, checkRateLimit } from './batteries/rate-limit';
 
 export function buildClaimQuery(hasRetries: boolean, hasPriority: boolean): string {
   const extraCols = (hasRetries ? ', backoff, run_at' : '') + (hasPriority ? ', priority' : '');
@@ -60,19 +61,36 @@ export function interruptibleSleep(ms: number, signal: AbortSignal): Promise<voi
   });
 }
 
+export interface ClaimResult {
+  job: JobRow | null;
+  rateLimited: boolean;
+}
+
 // Claims the next pending job for `name` inside a transaction.
-// Returns null (and rolls back) if none available.
+// If rateLimitConfig is provided, the count check runs inside the same transaction as the claim,
+// preventing a TOCTOU race between the limit check and the FOR UPDATE SKIP LOCKED.
+// Returns { job: null, rateLimited: true } if the limit is reached.
 // Caller is responsible for releasing the client after this returns.
 export async function claimJob(
   client: PoolClient,
   name: string,
   claimQuery: string,
-): Promise<JobRow | null> {
+  rateLimitConfig?: RateLimitConfig,
+): Promise<ClaimResult> {
   await client.query('BEGIN');
+
+  if (rateLimitConfig) {
+    const underLimit = await checkRateLimit(client, name, rateLimitConfig);
+    if (!underLimit) {
+      await client.query('ROLLBACK');
+      return { job: null, rateLimited: true };
+    }
+  }
+
   const result = await client.query<JobRow>(claimQuery, [name]);
   if (result.rows.length === 0) {
     await client.query('ROLLBACK');
-    return null;
+    return { job: null, rateLimited: false };
   }
   const row = result.rows[0];
   await client.query(
@@ -80,7 +98,7 @@ export async function claimJob(
     [row.id],
   );
   await client.query('COMMIT');
-  return row;
+  return { job: row, rateLimited: false };
 }
 
 export async function completeJob(pool: Pool, id: string): Promise<void> {
@@ -152,19 +170,22 @@ export class Worker<Payload> implements IWorker {
     await this.ready;
     while (!this.signal.aborted) {
       const client = await this.pool.connect();
-      let row: JobRow | null;
+      let claimResult: ClaimResult;
       try {
-        row = await claimJob(client, this.jobName, this.claimQuery);
+        const rateLimitConfig = this.context.rateLimits?.get(this.jobName);
+        claimResult = await claimJob(client, this.jobName, this.claimQuery, rateLimitConfig);
       } catch (err) {
         client.release(true);
         throw err;
       }
       client.release();
 
-      if (!row) {
+      if (claimResult.rateLimited || !claimResult.job) {
         await interruptibleSleep(this.pollIntervalMs, this.signal);
         continue;
       }
+
+      const row = claimResult.job;
 
       const job = rowToJob<Payload>(row);
 

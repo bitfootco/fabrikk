@@ -38,8 +38,12 @@ export interface JobRow {
 import { Pool } from 'pg';
 import type { RetriesConfig, RetriesJobOptions } from './batteries/retries';
 import type { HooksBus } from './batteries/hooks';
+import type { RateLimitConfig, RateLimitMap } from './batteries/rate-limit';
+import type { DashboardConfig } from './batteries/dashboard';
 
 export type { RetriesConfig, RetriesJobOptions };
+export type { RateLimitConfig };
+export type { DashboardConfig };
 
 interface BatteriesConfig {
   retries?: RetriesConfig;
@@ -47,6 +51,9 @@ interface BatteriesConfig {
   dlq?: boolean;
   cron?: boolean;
   priority?: boolean;
+  rateLimit?: boolean;
+  fanout?: boolean;
+  dashboard?: DashboardConfig;
 }
 
 type QueueConfigBase = { pollIntervalMs?: number; batteries?: BatteriesConfig };
@@ -72,6 +79,7 @@ export interface WorkerContext {
   hooks?: HooksBus;
   priority: boolean;
   dlq: boolean;
+  rateLimits?: RateLimitMap;
 }
 
 export interface JobEntry<Payload> {

@@ -13,7 +13,7 @@ Goal: implement the full public API defined in `README.md`, with every commit an
 - [x] M7: Battery — dlq — `fabrikk_dlq` table, `queue.dlq.list/replay/discard/replayAll`, requires retries battery {depends: M5}
 - [x] M8: Battery — cron — `fabrikk_cron` table, `queue.cron(name, expression, payload)`, advisory-lock deduplication across workers {depends: M4}
 - [x] M9: Battery — priority — `priority` column on `fabrikk_jobs`, `ORDER BY priority DESC, created_at ASC` in worker claim query {depends: M4}
-- [ ] M10: Battery — rateLimit — `queue.setRateLimit(name, { max, window })`, cluster-wide enforcement via Postgres timestamptz window {depends: M4}
-- [ ] M11: Battery — fanout — `queue.fanout(source, [targets])`, atomic multi-enqueue on source job insert {depends: M4}
-- [ ] M12: Battery — dashboard — `queue.dashboardHandler()` Node.js handler, all REST endpoints, Express + Fastify compatible {depends: M4}
-- [ ] M13: Publish prep — `npm run build` green, `dist/` has `.js` + `.d.ts` pairs, `package.json` `name=@bitfootco/fabrikk`, `main`/`exports`/`types`/`files` fields correct, `npm pack` produces a valid tarball {depends: M5, M6, M7, M8, M9, M10, M11, M12}
+- [x] M10: Battery — rateLimit — `queue.setRateLimit(name, { max, window })`, cluster-wide enforcement via Postgres timestamptz window {depends: M4}
+- [x] M11: Battery — fanout — `queue.fanout(source, [targets])`, atomic multi-enqueue on source job insert {depends: M4}
+- [x] M12: Battery — dashboard — `queue.dashboardHandler()` Node.js handler, all REST endpoints, Express + Fastify compatible {depends: M4}
+- [x] M13: Publish prep — `npm run build` green, `dist/` has `.js` + `.d.ts` pairs, `package.json` `name=@bitfootco/fabrikk`, `main`/`exports`/`types`/`files` fields correct, `npm pack` produces a valid tarball {depends: M5, M6, M7, M8, M9, M10, M11, M12}

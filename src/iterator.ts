@@ -1,7 +1,14 @@
 import { Pool } from 'pg';
 
-import { Job, JobEntry, JobRow, WorkerContext } from './types';
-import { buildClaimQuery, claimJob, completeJob, interruptibleSleep, rowToJob } from './worker';
+import { Job, JobEntry, WorkerContext } from './types';
+import {
+  buildClaimQuery,
+  claimJob,
+  completeJob,
+  interruptibleSleep,
+  rowToJob,
+  ClaimResult,
+} from './worker';
 
 export class JobIterator<Payload> implements AsyncIterable<JobEntry<Payload>> {
   private readonly claimQuery: string;
@@ -25,21 +32,21 @@ export class JobIterator<Payload> implements AsyncIterable<JobEntry<Payload>> {
     await this.ready;
     while (!this.signal.aborted) {
       const client = await this.pool.connect();
-      let row: JobRow | null;
+      let claimResult: ClaimResult;
       try {
-        row = await claimJob(client, this.jobName, this.claimQuery);
+        claimResult = await claimJob(client, this.jobName, this.claimQuery);
       } catch (err) {
         client.release(true);
         throw err;
       }
       client.release();
 
-      if (!row) {
+      if (!claimResult.job) {
         await interruptibleSleep(this.pollIntervalMs, this.signal);
         continue;
       }
 
-      const job: Job<Payload> = rowToJob<Payload>(row);
+      const job: Job<Payload> = rowToJob<Payload>(claimResult.job);
       yield {
         job,
         done: () => completeJob(this.pool, job.id),

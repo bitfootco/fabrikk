@@ -11,6 +11,8 @@ export type {
   WorkerHandler,
   RetriesConfig,
   RetriesJobOptions,
+  RateLimitConfig,
+  DashboardConfig,
 } from './types';
 
 export type { HooksEventMap } from './batteries/hooks';
