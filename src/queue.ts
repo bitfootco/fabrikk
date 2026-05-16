@@ -2,16 +2,12 @@ import { Pool } from 'pg';
 import { setMaxListeners } from 'events';
 
 import { bootstrap } from './schema';
-import { JobEntry, QueueConfig, EnqueueOptions, WorkerHandler } from './types';
+import { JobEntry, QueueConfig, EnqueueOptions, WorkerHandler, IWorker } from './types';
 import { HooksEmitter, HooksEventMap } from './batteries/hooks';
 import { DlqApi, moveToDlq } from './batteries/dlq';
+import { CronScheduler, scheduleCron } from './batteries/cron';
 import { Worker, DeadJobFn, deadJob } from './worker';
 import { JobIterator } from './iterator';
-
-// Queue tracks active workers via this minimal interface to avoid binding to the generic type
-interface IWorker {
-  wait(): Promise<void>;
-}
 
 export class Queue<Jobs extends Record<string, unknown>> {
   private readonly pool: Pool;
@@ -46,6 +42,19 @@ export class Queue<Jobs extends Record<string, unknown>> {
       this.dlq = new DlqApi(this.pool);
     }
     this.readyPromise = bootstrap(this.pool, config.batteries);
+
+    if (config.batteries?.cron) {
+      const scheduler = new CronScheduler(
+        this.pool,
+        this.abortController.signal,
+        this.pollIntervalMs,
+        this.readyPromise,
+        config.batteries.retries,
+        this.hooks,
+      );
+      this.activeWorkers.add(scheduler);
+      scheduler.wait().finally(() => this.activeWorkers.delete(scheduler));
+    }
   }
 
   async enqueue<K extends keyof Jobs & string>(
@@ -116,6 +125,18 @@ export class Queue<Jobs extends Record<string, unknown>> {
     if (!this.hooks)
       throw new Error('Hooks battery is not enabled. Add `hooks: true` to queue config.');
     this.hooks.on(event, handler);
+  }
+
+  async cron<K extends keyof Jobs & string>(
+    name: K,
+    expression: string,
+    payload: Jobs[K],
+  ): Promise<void> {
+    if (!this.batteries?.cron) {
+      throw new Error('Cron battery is not enabled. Add `cron: true` to queue config.');
+    }
+    await this.readyPromise;
+    await scheduleCron(this.pool, name as string, expression, payload);
   }
 
   async stop(gracePeriodMs = 30_000): Promise<void> {

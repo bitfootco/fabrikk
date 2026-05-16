@@ -42,6 +42,7 @@ interface BatteriesConfig {
   retries?: RetriesConfig;
   hooks?: boolean;
   dlq?: boolean;
+  cron?: boolean;
 }
 
 type QueueConfigBase = { pollIntervalMs?: number; batteries?: BatteriesConfig };
@@ -56,6 +57,10 @@ export interface EnqueueOptions {
 }
 
 export type WorkerHandler<Payload> = (job: Job<Payload>, signal: AbortSignal) => Promise<void>;
+
+export interface IWorker {
+  wait(): Promise<void>;
+}
 
 export interface JobEntry<Payload> {
   job: Job<Payload>;

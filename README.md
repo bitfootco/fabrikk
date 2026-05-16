@@ -162,7 +162,7 @@ Requires `retries` battery to be enabled.
 
 ### ⏰ `cron`
 
-Recurring jobs defined in code, not in a separate scheduler. Uses cron expressions with second-level precision.
+Recurring jobs defined in code, not in a separate scheduler. Uses standard 5-field cron expressions (minute, hour, day-of-month, month, day-of-week).
 
 ```ts
 batteries: {

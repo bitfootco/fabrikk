@@ -10,8 +10,8 @@ Goal: implement the full public API defined in `README.md`, with every commit an
 - [x] M4: Core tests — `test/setup.ts`, `test/queue.test.ts`, `test/worker.test.ts` against real Postgres; enqueue, claim, complete, stop, and iterator all green {depends: M3}
 - [x] M5: Battery — retries — exponential/linear/fixed backoff with jitter, per-job override at enqueue time, zero footprint when absent {depends: M4}
 - [x] M6: Battery — hooks — typed lifecycle events (`job:enqueued`, `job:started`, `job:completed`, `job:failed`, `job:retrying`, `job:dead`), `event.jobName` narrows payload type {depends: M4}
-- [ ] M7: Battery — dlq — `fabrikk_dlq` table, `queue.dlq.list/replay/discard/replayAll`, requires retries battery {depends: M5}
-- [ ] M8: Battery — cron — `fabrikk_cron` table, `queue.cron(name, expression, payload)`, advisory-lock deduplication across workers {depends: M4}
+- [x] M7: Battery — dlq — `fabrikk_dlq` table, `queue.dlq.list/replay/discard/replayAll`, requires retries battery {depends: M5}
+- [x] M8: Battery — cron — `fabrikk_cron` table, `queue.cron(name, expression, payload)`, advisory-lock deduplication across workers {depends: M4}
 - [ ] M9: Battery — priority — `priority` column on `fabrikk_jobs`, `ORDER BY priority DESC, created_at ASC` in worker claim query {depends: M4}
 - [ ] M10: Battery — rateLimit — `queue.setRateLimit(name, { max, window })`, cluster-wide enforcement via Postgres timestamptz window {depends: M4}
 - [ ] M11: Battery — fanout — `queue.fanout(source, [targets])`, atomic multi-enqueue on source job insert {depends: M4}

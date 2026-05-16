@@ -15,3 +15,4 @@ export type {
 
 export type { HooksEventMap } from './batteries/hooks';
 export type { DlqEntry } from './batteries/dlq';
+export type { CronEntry } from './batteries/cron';

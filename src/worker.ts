@@ -1,6 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 
-import { Job, JobRow, WorkerHandler } from './types';
+import { Job, JobRow, IWorker, WorkerHandler } from './types';
 import { HooksBus } from './batteries/hooks';
 import { RetriesConfig, computeDelay } from './batteries/retries';
 
@@ -122,11 +122,6 @@ export async function retryJob(
     [id, delayMs],
   );
   return delayMs;
-}
-
-// Minimal interface used by Queue to track workers without binding to the generic
-interface IWorker {
-  wait(): Promise<void>;
 }
 
 export class Worker<Payload> implements IWorker {

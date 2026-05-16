@@ -75,9 +75,31 @@ const CREATE_DLQ_NAME_INDEX = `
     ON fabrikk_dlq (name)
 `;
 
+const CREATE_CRON_TABLE = `
+  CREATE TABLE IF NOT EXISTS fabrikk_cron (
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_name     TEXT        NOT NULL,
+    expression   TEXT        NOT NULL,
+    payload      JSONB       NOT NULL DEFAULT '{}',
+    next_run     TIMESTAMPTZ,
+    last_run     TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Upsert key: (job_name, expression). Changing expression for the same job name
+    -- creates a second active row — callers must delete the old schedule explicitly.
+    CONSTRAINT fabrikk_cron_job_expression UNIQUE (job_name, expression)
+  )
+`;
+
+const CREATE_CRON_NEXT_RUN_INDEX = `
+  CREATE INDEX IF NOT EXISTS fabrikk_cron_next_run_idx
+    ON fabrikk_cron (next_run)
+    WHERE next_run IS NOT NULL
+`;
+
 interface BootstrapBatteries {
   retries?: RetriesConfig;
   dlq?: boolean;
+  cron?: boolean;
 }
 
 export async function bootstrap(pool: Pool, batteries?: BootstrapBatteries): Promise<void> {
@@ -104,6 +126,11 @@ export async function bootstrap(pool: Pool, batteries?: BootstrapBatteries): Pro
       if (batteries?.dlq) {
         await client.query(CREATE_DLQ_TABLE);
         await client.query(CREATE_DLQ_NAME_INDEX);
+      }
+
+      if (batteries?.cron) {
+        await client.query(CREATE_CRON_TABLE);
+        await client.query(CREATE_CRON_NEXT_RUN_INDEX);
       }
     } finally {
       await client.query('SELECT pg_advisory_unlock($1)', [FABRIKK_LOCK_KEY]);
