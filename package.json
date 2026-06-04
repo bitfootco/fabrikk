@@ -1,6 +1,6 @@
 {
   "name": "@bitfootco/fabrikk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Postgres-native job queue for TypeScript. Bare by default. Powerful by choice.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
