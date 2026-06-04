@@ -23,13 +23,13 @@ const CREATE_JOBS_TABLE = `
 `;
 
 const CREATE_CLAIM_INDEX = `
-  CREATE INDEX IF NOT EXISTS fabrikk_jobs_claim_idx
+  CREATE INDEX fabrikk_jobs_claim_idx
     ON fabrikk_jobs (status, created_at)
     WHERE status = 'pending'
 `;
 
 const CREATE_PRIORITY_INDEX = `
-  CREATE INDEX IF NOT EXISTS fabrikk_jobs_priority_idx
+  CREATE INDEX fabrikk_jobs_priority_idx
     ON fabrikk_jobs (status, priority DESC, created_at ASC)
     WHERE status = 'pending'
 `;
@@ -81,7 +81,7 @@ const CREATE_DLQ_TABLE = `
 `;
 
 const CREATE_DLQ_NAME_INDEX = `
-  CREATE INDEX IF NOT EXISTS fabrikk_dlq_name_idx
+  CREATE INDEX fabrikk_dlq_name_idx
     ON fabrikk_dlq (name)
 `;
 
@@ -101,7 +101,7 @@ const CREATE_CRON_TABLE = `
 `;
 
 const CREATE_CRON_NEXT_RUN_INDEX = `
-  CREATE INDEX IF NOT EXISTS fabrikk_cron_next_run_idx
+  CREATE INDEX fabrikk_cron_next_run_idx
     ON fabrikk_cron (next_run)
     WHERE next_run IS NOT NULL
 `;
@@ -111,6 +111,23 @@ interface BootstrapBatteries {
   dlq?: boolean;
   cron?: boolean;
   priority?: boolean;
+}
+
+// Postgres checks table ownership before evaluating IF NOT EXISTS on CREATE INDEX,
+// so we gate on pg_indexes ourselves to avoid the ownership error when a different
+// user created the tables (e.g. credential rotation, migration user).
+async function ensureIndex(
+  client: PoolClient,
+  indexName: string,
+  createSql: string,
+): Promise<void> {
+  const { rows } = await client.query(
+    `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1`,
+    [indexName],
+  );
+  if (!rows.length) {
+    await client.query(createSql);
+  }
 }
 
 export async function bootstrap(pool: Pool, batteries?: BootstrapBatteries): Promise<void> {
@@ -128,26 +145,30 @@ export async function bootstrap(pool: Pool, batteries?: BootstrapBatteries): Pro
 
     try {
       await client.query(CREATE_JOBS_TABLE);
-      await client.query(CREATE_CLAIM_INDEX);
+      await ensureIndex(client, 'fabrikk_jobs_claim_idx', CREATE_CLAIM_INDEX);
       const expectedColumns = [
         ...BASE_COLUMNS,
         ...(batteries?.retries ? RETRIES_COLUMNS : []),
         ...(batteries?.priority ? PRIORITY_COLUMNS : []),
       ];
+      // selfHeal uses ADD COLUMN IF NOT EXISTS directly — ALTER TABLE's ownership check only
+      // fires when the column is missing (i.e. this is a first-run for that column), at which
+      // point the current user must own the table anyway to have just created it above.
+      // CREATE INDEX has no such guarantee (the index may predate this credential), hence ensureIndex.
       await selfHeal(client, expectedColumns);
 
       if (batteries?.priority) {
-        await client.query(CREATE_PRIORITY_INDEX);
+        await ensureIndex(client, 'fabrikk_jobs_priority_idx', CREATE_PRIORITY_INDEX);
       }
 
       if (batteries?.dlq) {
         await client.query(CREATE_DLQ_TABLE);
-        await client.query(CREATE_DLQ_NAME_INDEX);
+        await ensureIndex(client, 'fabrikk_dlq_name_idx', CREATE_DLQ_NAME_INDEX);
       }
 
       if (batteries?.cron) {
         await client.query(CREATE_CRON_TABLE);
-        await client.query(CREATE_CRON_NEXT_RUN_INDEX);
+        await ensureIndex(client, 'fabrikk_cron_next_run_idx', CREATE_CRON_NEXT_RUN_INDEX);
       }
     } finally {
       await client.query('SELECT pg_advisory_unlock($1)', [FABRIKK_LOCK_KEY]);
